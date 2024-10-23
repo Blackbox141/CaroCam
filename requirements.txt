@@ -4,3 +4,10 @@ matplotlib
 ultralytics
 requests
 streamlit
+gradio
+cv2
+matplotlib.pyplot
+matplotlib.patches
+numpy
+torch
+torchvision
