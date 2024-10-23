@@ -8,7 +8,7 @@ import torch
 import torchvision
 
 # Laden des trainierten Modells
-model = YOLO('runs/detect/yolov8-chess11/weights/best.pt')
+model = YOLO('Figure Detection/runs/detect/yolov8-chess11/weights/best.pt')
 
 # Funktion zur Anwendung von Non-Maximum Suppression (NMS)
 def apply_nms(result, iou_threshold=0.5):
