@@ -4,5 +4,6 @@ matplotlib
 ultralytics
 requests
 streamlit
-numpy
 torchvision
+opencv-python
+python-chess

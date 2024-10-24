@@ -1,11 +1,15 @@
-import streamlit_refactored as st
 import numpy as np
 import cv2
 from matplotlib import pyplot as plt
 import matplotlib.patches as patches
 from ultralytics import YOLO
 import os
-import requests  # Für die Kommunikation mit der API
+import requests
+import chess
+import chess.svg
+import webbrowser
+import tempfile
+import io
 
 # Holen des aktuellen Skriptverzeichnisses
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,7 +25,7 @@ if os.path.exists(piece_model_path) and os.path.exists(corner_model_path):
     piece_model = YOLO(piece_model_path)
     corner_model = YOLO(corner_model_path)
 else:
-    raise FileNotFoundError(f"Model file not found. Check paths:\nPiece model: {piece_model_path}\nCorner model: {corner_model_path}")
+    raise FileNotFoundError(f"Modelldatei nicht gefunden. Überprüfe die Pfade:\nPiece model: {piece_model_path}\nCorner model: {corner_model_path}")
 
 # FEN-Zeichen für Figuren
 FEN_MAPPING = {
@@ -39,7 +43,7 @@ FEN_MAPPING = {
     'White Knight': 'N'
 }
 
-# Funktion zur Erkennung der Schachfiguren und Berechnung der Mittelpunkte
+# Funktionen
 def detect_pieces(image):
     results = piece_model.predict(image, conf=0.1, iou=0.3, imgsz=1400)
     result = results[0]
@@ -62,7 +66,6 @@ def detect_pieces(image):
 
     return np.array(midpoints), labels, result
 
-# Funktion zur Erkennung der Eckpunkte A, B und C mit YOLO
 def detect_corners(image):
     results = corner_model(image)
     points = {}
@@ -85,13 +88,11 @@ def detect_corners(image):
 
     return points, results
 
-# Funktion zur Berechnung der Ecke D
 def calculate_point_D(A, B, C):
     BC = C - B
     D_calculated = A + BC
     return D_calculated
 
-# Funktion zur Sortierung der Punkte: A oben links, B unten links, C unten rechts, D oben rechts
 def sort_points(A, B, C, D):
     points = np.array([A, B, C, D])
     # Sortiere die Punkte nach der y-Koordinate (oben und unten)
@@ -105,7 +106,6 @@ def sort_points(A, B, C, D):
     B_sorted, C_sorted = bottom_points  # B ist unten links, C ist unten rechts
     return np.array([A_sorted, B_sorted, C_sorted, D_sorted], dtype=np.float32)
 
-# Funktion zur Perspektivtransformation (Entzerren des Schachbretts)
 def warp_perspective(image, src_points):
     dst_size = 800  # Zielgröße 800x800 Pixel für das quadratische Schachbrett
     dst_points = np.array([
@@ -123,11 +123,9 @@ def warp_perspective(image, src_points):
 
     return warped_image, M
 
-# Funktion zum Drehen des Bildes um 90 Grad im Uhrzeigersinn
 def rotate_image(image):
     return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
 
-# Funktion zur Visualisierung der Eckpunkte
 def plot_corners(image, points):
     fig, ax = plt.subplots(1, figsize=(8, 8))
     ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
@@ -137,9 +135,8 @@ def plot_corners(image, points):
                 bbox=dict(facecolor='red', alpha=0.5))
     plt.title("Erkannte Eckpunkte des Schachbretts")
     plt.axis('off')
-    plt.show()
+    return fig  # Rückgabe des Figure-Objekts
 
-# Funktion zur Visualisierung von Bounding Boxes und Schachfiguren
 def plot_pieces(image, result):
     fig, ax = plt.subplots(1, figsize=(12, 12))
     ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
@@ -157,9 +154,8 @@ def plot_pieces(image, result):
 
     plt.title("Erkannte Schachfiguren mit Bounding Boxes")
     plt.axis('off')
-    plt.show()
+    return fig  # Rückgabe des Figure-Objekts
 
-# Funktion zur Visualisierung der transformierten Schachfiguren auf dem entzerrten Schachbrett
 def plot_transformed_pieces(image, midpoints, labels):
     fig, ax = plt.subplots(1, figsize=(8, 8))
     ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
@@ -171,9 +167,8 @@ def plot_transformed_pieces(image, midpoints, labels):
 
     plt.title("Transformierte Schachfiguren auf dem entzerrten Schachbrett")
     plt.axis('off')
-    plt.show()
+    return fig  # Rückgabe des Figure-Objekts
 
-# Neue Funktion zur Visualisierung der Figuren im Raster
 def plot_final_board(image, midpoints, labels):
     grid_size = 8
     step_size = image.shape[0] // grid_size  # Größe jeder Zelle
@@ -198,16 +193,21 @@ def plot_final_board(image, midpoints, labels):
         x, y = point
         col = int(x // step_size)
         row = int(y // step_size)
-        square_x = col * step_size + step_size / 2
-        square_y = row * step_size + step_size / 2
 
-        ax.text(square_x, square_y, FEN_MAPPING[label], fontsize=20, color='red', ha='center', va='center')
+        # Prüfe, ob die Position innerhalb der Grenzen liegt
+        if 0 <= row < grid_size and 0 <= col < grid_size:
+            square_x = col * step_size + step_size / 2
+            square_y = row * step_size + step_size / 2
+
+            ax.text(square_x, square_y, FEN_MAPPING[label], fontsize=20, color='red', ha='center', va='center')
+        else:
+            # Ignoriere Figuren außerhalb des Schachbretts
+            print(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist außerhalb des Schachbretts und wird nicht dargestellt.")
 
     plt.title("Schachbrett mit Figurenpositionen")
     plt.axis('off')
-    plt.show()
+    return fig  # Rückgabe des Figure-Objekts
 
-# Funktion zur FEN-Notationserstellung
 def generate_fen_from_board(midpoints, labels, grid_size=8):
     # Erstelle ein leeres Schachbrett (8x8) in Form einer Liste
     board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
@@ -219,8 +219,14 @@ def generate_fen_from_board(midpoints, labels, grid_size=8):
         x, y = point
         col = int(x // step_size)
         row = int(y // step_size)
-        fen_char = FEN_MAPPING.get(label, '')
-        board[row][col] = fen_char
+
+        # Prüfe, ob die Position innerhalb der Grenzen liegt
+        if 0 <= row < grid_size and 0 <= col < grid_size:
+            fen_char = FEN_MAPPING.get(label, '')
+            board[row][col] = fen_char
+        else:
+            # Ignoriere Figuren außerhalb des Schachbretts
+            print(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist außerhalb des Schachbretts und wird ignoriert.")
 
     # Erstelle die FEN-Notation
     fen_rows = []
@@ -244,7 +250,6 @@ def generate_fen_from_board(midpoints, labels, grid_size=8):
 
     return fen_string
 
-# Funktion zur Analyse der FEN-Notation mit der Stockfish API
 def analyze_fen_with_stockfish(fen, depth=15):
     url = 'https://stockfish.online/api/s/v2.php'
 
@@ -264,9 +269,21 @@ def analyze_fen_with_stockfish(fen, depth=15):
             print(data)
 
             if data.get("success"):
-                best_move = data.get("bestmove", "None")
+                raw_best_move = data.get("bestmove", "None")
                 evaluation = data.get("evaluation", "None")
                 mate = data.get("mate", None)
+
+                # Parsen des best_move Strings
+                if raw_best_move != "None":
+                    # Beispiel für raw_best_move: 'bestmove c3b4 ponder d7d6'
+                    tokens = raw_best_move.split()
+                    if len(tokens) >= 2:
+                        best_move = tokens[1]  # Extrahiere den eigentlichen Zug
+                    else:
+                        best_move = None
+                        print("Konnte den besten Zug nicht aus der API-Antwort extrahieren.")
+                else:
+                    best_move = None
 
                 # Ausgabe der Ergebnisse
                 print(f"\nStockfish Bewertung:")
@@ -275,6 +292,8 @@ def analyze_fen_with_stockfish(fen, depth=15):
 
                 if mate is not None:
                     print(f"Matt in: {mate} Zügen")
+
+                return best_move  # Rückgabe des besten Zugs
             else:
                 print("Fehler in der API-Antwort:", data.get("error", "Unbekannter Fehler"))
         else:
@@ -284,85 +303,120 @@ def analyze_fen_with_stockfish(fen, depth=15):
     except Exception as e:
         print(f"Ein Fehler ist aufgetreten: {e}")
 
+    return None  # Falls kein Zug empfohlen wurde
 
-# Hauptfunktion
+def plot_board_with_move(fen, best_move):
+    import chess
+    import chess.svg
+    import webbrowser
+    import tempfile
+    import os
+
+    board = chess.Board(fen)
+
+    # Wenn ein bester Zug vorhanden ist, erstellen wir einen Pfeil
+    if best_move:
+        try:
+            move = chess.Move.from_uci(best_move)
+            print(f"Empfohlener Zug: '{best_move}' wird als Pfeil dargestellt.")
+            arrows = [chess.svg.Arrow(move.from_square, move.to_square, color='#FF0000')]
+        except ValueError:
+            print(f"Der empfohlene Zug '{best_move}' ist ungültig.")
+            arrows = []
+    else:
+        print("Kein Zug wurde empfohlen oder der Zug ist ungültig.")
+        arrows = []
+
+    # Erzeuge ein SVG-Bild des Schachbretts mit dem Pfeil
+    board_svg = chess.svg.board(board=board, size=400, arrows=arrows)
+
+    # Speichere das SVG-Bild in einer temporären Datei
+    with tempfile.NamedTemporaryFile('w', delete=False, suffix='.svg') as f:
+        f.write(board_svg)
+        svg_filename = f.name
+
+    # Öffne das SVG-Bild im Standard-Webbrowser
+    webbrowser.open('file://' + os.path.realpath(svg_filename))
+
 def main():
-    # Lade das Bild
-    image_path = 'C:/Test_Images_Yolo/IMG_zug1.jpeg'
-    image = cv2.imread(image_path)
-    if image is None:
-        print(f"Fehler beim Laden des Bildes: {image_path}")
-        return
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    print("Schachbrett- und Figuren-Erkennung")
 
-    # Schritt 1: Erkennung der Schachfiguren und Visualisierung
-    piece_midpoints, piece_labels, piece_results = detect_pieces(image)
-    plot_pieces(image, piece_results)
+    # Bildpfad eingeben
+    image_path = input("Gib den Pfad zum Schachbrettbild ein: ")
 
-    # Schritt 2: Erkennung der Eckpunkte und Visualisierung
-    detected_points, corner_results = detect_corners(image)
-    plot_corners(image, detected_points)
+    if os.path.exists(image_path):
+        # Bild lesen
+        image = cv2.imread(image_path)
+        if image is None:
+            print("Fehler beim Laden des Bildes.")
+            return
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-    # Schritt 3: Berechnung der Ecke D und Perspektivtransformation
-    A = detected_points["A"]
-    B = detected_points["B"]
-    C = detected_points["C"]
-    D_calculated = calculate_point_D(A, B, C)
+        # Schritt 1: Erkennung der Schachfiguren und Visualisierung
+        piece_midpoints, piece_labels, piece_results = detect_pieces(image)
+        fig1 = plot_pieces(image, piece_results)
+        plt.show()
 
-    # Korrektur der Ecke D
-    correction_vector = np.array([324, 222])
-    D_corrected = D_calculated + correction_vector
+        # Schritt 2: Erkennung der Eckpunkte und Visualisierung
+        detected_points, corner_results = detect_corners(image)
+        fig2 = plot_corners(image, detected_points)
+        plt.show()
 
-    # Sortiere die Punkte
-    sorted_points = sort_points(A, B, C, D_corrected.astype(int))
+        # Schritt 3: Berechnung der Ecke D und Perspektivtransformation
+        A = detected_points["A"]
+        B = detected_points["B"]
+        C = detected_points["C"]
+        D_calculated = calculate_point_D(A, B, C)
 
-    # Perspektivtransformation durchführen
-    warped_image, M = warp_perspective(image_rgb, sorted_points)
-    plt.figure(figsize=(8, 8))
-    plt.imshow(warped_image)
-    plt.title("Entzerrtes Schachbrett")
-    plt.axis('off')
-    plt.show()
+        # Korrektur der Ecke D
+        correction_vector = np.array([324, 222])
+        D_corrected = D_calculated + correction_vector
 
-    # Schritt 4: Schachfiguren transformieren und visualisieren
-    ones = np.ones((piece_midpoints.shape[0], 1))
-    piece_midpoints_homogeneous = np.hstack([piece_midpoints, ones])
-    transformed_midpoints = M @ piece_midpoints_homogeneous.T
-    transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
-    transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
+        # Sortiere die Punkte
+        sorted_points = sort_points(A, B, C, D_corrected.astype(int))
 
-    # Drehe das entzerrte Bild und die transformierten Mittelpunkte
-    rotated_warped_image = rotate_image(warped_image)
+        # Perspektivtransformation durchführen
+        warped_image, M = warp_perspective(image_rgb, sorted_points)
+        fig3 = plt.figure(figsize=(8, 8))
+        plt.imshow(warped_image)
+        plt.title("Entzerrtes Schachbrett")
+        plt.axis('off')
+        plt.show()
 
-    rotated_midpoints = np.zeros_like(transformed_midpoints)
-    rotated_midpoints[:, 0] = rotated_warped_image.shape[1] - transformed_midpoints[:, 1]
-    rotated_midpoints[:, 1] = transformed_midpoints[:, 0]
+        # Schritt 4: Schachfiguren transformieren und visualisieren
+        ones = np.ones((piece_midpoints.shape[0], 1))
+        piece_midpoints_homogeneous = np.hstack([piece_midpoints, ones])
+        transformed_midpoints = M @ piece_midpoints_homogeneous.T
+        transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
+        transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
 
-    plot_transformed_pieces(rotated_warped_image, rotated_midpoints, piece_labels)
+        # Drehe das entzerrte Bild und die transformierten Mittelpunkte
+        rotated_warped_image = rotate_image(warped_image)
 
-    # Schritt 5: Generiere die FEN-Notation
-    fen_string = generate_fen_from_board(rotated_midpoints, piece_labels)
-    print(f"FEN-Notation: {fen_string}")
+        rotated_midpoints = np.zeros_like(transformed_midpoints)
+        rotated_midpoints[:, 0] = rotated_warped_image.shape[1] - transformed_midpoints[:, 1]
+        rotated_midpoints[:, 1] = transformed_midpoints[:, 0]
 
-    # Schritt 6: Visuelle Darstellung der Figuren im Raster
-    plot_final_board(rotated_warped_image, rotated_midpoints, piece_labels)
+        fig4 = plot_transformed_pieces(rotated_warped_image, rotated_midpoints, piece_labels)
+        plt.show()
 
-    # Schritt 7: Analyse der FEN-Notation mit der Stockfish API
-    analyze_fen_with_stockfish(fen_string)
+        # Schritt 5: Generiere die FEN-Notation
+        fen_string = generate_fen_from_board(rotated_midpoints, piece_labels)
+        print(f"FEN-Notation: {fen_string}")
+
+        # Schritt 6: Visuelle Darstellung der Figuren im Raster
+        fig5 = plot_final_board(rotated_warped_image, rotated_midpoints, piece_labels)
+        plt.show()
+
+        # Schritt 7: Analyse der FEN-Notation mit der Stockfish API
+        best_move = analyze_fen_with_stockfish(fen_string)
+
+        # Schritt 8: Darstellung der FEN-Notation mit dem empfohlenen Zug
+        plot_board_with_move(fen_string, best_move)
+
+    else:
+        print("Bilddatei nicht gefunden. Bitte überprüfe den Pfad.")
 
 if __name__ == "__main__":
     main()
-
-
-def main():
-    st.title("Schachbrett- und Figuren-Erkennung")
-
-    # Bild hochladen
-    uploaded_file = st.file_uploader("Lade ein Bild des Schachbretts hoch", type=["jpg", "jpeg", "png"])
-
-    if uploaded_file is not None:
-        # Bild lesen
-        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        image = cv2.imdecode(file_bytes, 1)
-
-
+# C:/Test_Images_Yolo/IMG_zug1.jpeg
