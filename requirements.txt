@@ -7,3 +7,4 @@ streamlit
 torchvision
 opencv-python
 python-chess
+streamlit-image-coordinates

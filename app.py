@@ -788,9 +788,9 @@ def main():
 
 if __name__ == "__main__":
     main()
-'''
 
-# Neuer Code 30.10.24
+
+# Neuer Code 30.10.24 - Webseite Schwarz-Weiss und Seite Weiss bestimmen
 
 import streamlit as st
 import numpy as np
@@ -1253,3 +1253,7 @@ def main():
 if __name__ == "__main__":
     main()
 
+
+'''
+
+# Code Anpassung 30.10.24 - interaktiv
