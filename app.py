@@ -1256,8 +1256,7 @@ if __name__ == "__main__":
 
 '''
 
-# Code Anpassung 30.10.24 - interaktiv
-
+# Code Anpassung 30.10.24 - interaktiv live input
 import streamlit as st
 import numpy as np
 import cv2
@@ -1268,7 +1267,6 @@ import requests
 import chess
 import chess.svg
 from PIL import Image
-from streamlit_image_coordinates import streamlit_image_coordinates
 
 # Holen des aktuellen Skriptverzeichnisses
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1302,9 +1300,6 @@ FEN_MAPPING = {
     'White Rook': 'R',
     'White Knight': 'N'
 }
-
-# Umgekehrte Zuordnung für das Umschalten der Farben
-REVERSE_FEN_MAPPING = {v: k for k, v in FEN_MAPPING.items()}
 
 def detect_pieces(image):
     results = piece_model.predict(image, conf=0.1, iou=0.3, imgsz=1400)
@@ -1389,10 +1384,37 @@ def warp_perspective(image, src_points):
 def rotate_image(image):
     return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
 
-def generate_fen_from_board(board_state, player_to_move='w'):
+def generate_fen_from_board(midpoints, labels, grid_size=8, orientation='Weiß', player_to_move='Weiß'):
+    # Erstelle ein leeres Schachbrett (8x8) in Form einer Liste
+    board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
+
+    step_size = 800 // grid_size  # Größe jeder Zelle (entspricht der Größe des entzerrten Bildes)
+
+    # Fülle das Board mit den Figuren
+    for point, label in zip(midpoints, labels):
+        x, y = point
+        col = int(x // step_size)
+        row = int(y // step_size)
+
+        # Anpassung der Position basierend auf der Ausrichtung
+        if orientation == 'Weiß':
+            # Standardausrichtung (Weiß unten)
+            row = grid_size - 1 - row
+        elif orientation == 'Schwarz':
+            # Schachbrett um 180 Grad drehen
+            col = grid_size - 1 - col
+
+        # Prüfe, ob die Position innerhalb der Grenzen liegt
+        if 0 <= row < grid_size and 0 <= col < grid_size:
+            fen_char = FEN_MAPPING.get(label, '')
+            board[row][col] = fen_char
+        else:
+            # Ignoriere Figuren außerhalb des Schachbretts
+            st.write(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist außerhalb des Schachbretts und wird ignoriert.")
+
     # Erstelle die FEN-Notation
     fen_rows = []
-    for row in board_state:
+    for row in board:
         fen_row = ''
         empty_count = 0
         for square in row:
@@ -1410,8 +1432,11 @@ def generate_fen_from_board(board_state, player_to_move='w'):
     # Verbinde alle Zeilen mit Schrägstrichen
     fen_position = '/'.join(fen_rows)
 
+    # Bestimme die Farbe, die am Zug ist
+    player = 'w' if player_to_move == 'Weiß' else 'b'
+
     # FEN-String zusammenstellen
-    fen_string = fen_position + f" {player_to_move} - - 0 1"
+    fen_string = fen_position + f" {player} - - 0 1"
 
     return fen_string
 
@@ -1457,7 +1482,7 @@ def analyze_fen_with_stockfish(fen, depth=15):
 
                 return best_move  # Rückgabe des besten Zugs
             else:
-                st.error("Fehler in der API-Antwort:", data.get("error", "Unbekannter Fehler"))
+                st.error(f"Fehler in der API-Antwort: {data.get('error', 'Unbekannter Fehler')}")
         else:
             st.error(f"Fehler bei der Kommunikation mit der Stockfish API. Status code: {response.status_code}")
             st.error(f"Antwort: {response.text}")
@@ -1492,16 +1517,19 @@ def plot_board_with_move(fen, best_move):
 def main():
     st.title("Schachbrett- und Figuren-Erkennung")
 
-    # Bild hochladen
-    uploaded_file = st.file_uploader("Lade ein Bild des Schachbretts hoch", type=["jpg", "jpeg", "png"])
+    # Bild aufnehmen oder hochladen
+    st.write("Bitte nimm ein Foto des Schachbretts auf oder lade ein Bild hoch.")
+    image_source = st.radio("Bildquelle auswählen:", ("Kamera", "Datei hochladen"))
+
+    if image_source == "Kamera":
+        uploaded_file = st.camera_input("Nimm ein Foto auf")
+    else:
+        uploaded_file = st.file_uploader("Lade ein Bild des Schachbretts hoch", type=["jpg", "jpeg", "png"])
 
     if uploaded_file is not None:
         # Bild lesen
-        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        image = cv2.imdecode(file_bytes, 1)
-        if image is None:
-            st.error("Fehler beim Laden des Bildes.")
-            return
+        image = Image.open(uploaded_file)
+        image = np.array(image)
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         # Schritt 1: Erkennung der Schachfiguren und Visualisierung
@@ -1547,86 +1575,24 @@ def main():
         st.subheader("Entzerrtes Schachbrett")
         st.image(rotated_warped_image, caption="Entzerrtes Schachbrett", use_column_width=True)
 
+        # Benutzer wählt die Ausrichtung
+        st.write("Bitte wählen Sie, welche Farbe unten auf dem Schachbrett ist.")
+        orientation = st.radio("Welche Farbe ist unten auf dem Schachbrett?", ('Weiß', 'Schwarz'))
+
         # Benutzer gibt an, welche Farbe am Zug ist
         st.write("Welche Farbe ist am Zug?")
         player_to_move = st.radio("Farbe am Zug", ('Weiß', 'Schwarz'))
-        player = 'w' if player_to_move == 'Weiß' else 'b'
 
-        # Generiere das initiale Board State
-        grid_size = 8
-        step_size = rotated_warped_image.shape[0] // grid_size  # Größe jeder Zelle
-
-        # Initialisiere das Board
-        board_state = [['' for _ in range(grid_size)] for _ in range(grid_size)]
-
-        # Fülle das Board mit den erkannten Figuren
-        for point, label in zip(rotated_midpoints, piece_labels):
-            x, y = point
-            col = int(x // step_size)
-            row = int(y // step_size)
-
-            # Prüfe, ob die Position innerhalb der Grenzen liegt
-            if 0 <= row < grid_size and 0 <= col < grid_size:
-                fen_char = FEN_MAPPING.get(label, '')
-                board_state[row][col] = fen_char
-            else:
-                # Ignoriere Figuren außerhalb des Schachbretts
-                st.write(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist außerhalb des Schachbretts und wird ignoriert.")
-
-        # Interaktive Anpassung der Figurenfarben
-        st.subheader("Interaktive Anpassung der Figurenfarben")
-        st.write("Klicken Sie auf ein Feld, um die Farbe der Figur zu wechseln.")
-
-        # Erstelle ein Bild des Schachbretts mit den Figuren
-        board_image = rotated_warped_image.copy()
-        for row in range(grid_size):
-            for col in range(grid_size):
-                if board_state[row][col] != '':
-                    # Zeichne einen Kreis an der Position der Figur
-                    x = int((col + 0.5) * step_size)
-                    y = int((row + 0.5) * step_size)
-                    color = (255, 0, 0) if board_state[row][col].isupper() else (0, 0, 255)
-                    cv2.circle(board_image, (x, y), 20, color, -1)
-
-        # Zeige das Bild mit der Möglichkeit, Klicks zu erfassen
-        coords = streamlit_image_coordinates('Bitte klicken Sie auf das Schachbrett, um Figuren anzupassen:', board_image)
-
-        # Wenn der Benutzer geklickt hat
-        if coords is not None:
-            x_click = coords['x']
-            y_click = coords['y']
-
-            # Bestimme die angeklickte Zelle
-            col_clicked = int(x_click // step_size)
-            row_clicked = int(y_click // step_size)
-
-            # Prüfe, ob die Position innerhalb der Grenzen liegt
-            if 0 <= row_clicked < grid_size and 0 <= col_clicked < grid_size:
-                # Umschalten der Farbe der Figur
-                current_piece = board_state[row_clicked][col_clicked]
-                if current_piece != '':
-                    # Umschalten zwischen Großbuchstaben (Weiß) und Kleinbuchstaben (Schwarz)
-                    if current_piece.isupper():
-                        new_piece = current_piece.lower()
-                    else:
-                        new_piece = current_piece.upper()
-                    board_state[row_clicked][col_clicked] = new_piece
-
-                # Aktualisiere das Bild
-                board_image = rotated_warped_image.copy()
-                for row in range(grid_size):
-                    for col in range(grid_size):
-                        if board_state[row][col] != '':
-                            x = int((col + 0.5) * step_size)
-                            y = int((row + 0.5) * step_size)
-                            color = (255, 0, 0) if board_state[row][col].isupper() else (0, 0, 255)
-                            cv2.circle(board_image, (x, y), 20, color, -1)
-
-                # Zeige das aktualisierte Bild
-                st.image(board_image, caption="Aktualisiertes Schachbrett", use_column_width=True)
+        # Anpassung basierend auf der Ausrichtung
+        if orientation == 'Schwarz':
+            # Spiegeln des Schachbretts vertikal
+            rotated_warped_image = cv2.flip(rotated_warped_image, 0)
+            # Anpassung der Mittelpunkte
+            h = rotated_warped_image.shape[0]
+            rotated_midpoints[:, 1] = h - rotated_midpoints[:, 1]
 
         # Schritt 5: Generiere die FEN-Notation
-        fen_string = generate_fen_from_board(board_state, player_to_move=player)
+        fen_string = generate_fen_from_board(rotated_midpoints, piece_labels, orientation=orientation, player_to_move=player_to_move)
         st.write(f"**FEN-Notation:** {fen_string}")
 
         # Schritt 6: Analyse der FEN-Notation mit der Stockfish API
@@ -1667,7 +1633,7 @@ def main():
             st.image(rotated_warped_image, caption="Entzerrtes Schachbrett (angepasste Ausrichtung)", use_column_width=True)
 
     else:
-        st.write("Bitte lade ein Bild des Schachbretts hoch.")
+        st.write("Bitte nimm ein Foto auf oder lade ein Bild des Schachbretts hoch.")
 
 if __name__ == "__main__":
     main()
