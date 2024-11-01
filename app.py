@@ -804,6 +804,7 @@ import tempfile
 import io
 from PIL import Image
 
+
 # Holen des aktuellen Skriptverzeichnisses
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
