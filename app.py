@@ -1242,10 +1242,10 @@ def main():
         # Mappe 'left' und 'right' zu 'w' und 'b' für die FEN-Notation
         if player_turn == 'left':
             # Angenommen, 'left' entspricht Weiß am Zug
-            player_to_move = 'w'
+            player_to_move = 'b'
         elif player_turn == 'right':
             # Angenommen, 'right' entspricht Schwarz am Zug
-            player_to_move = 'b'
+            player_to_move = 'w'
         elif player_turn == 'white':
             player_to_move = 'w'
         elif player_turn == 'black':
