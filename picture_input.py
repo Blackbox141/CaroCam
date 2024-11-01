@@ -43,6 +43,10 @@ FEN_MAPPING = {
     'White Knight': 'N'
 }
 
+# Parameter für die Korrektur (kannst du hier anpassen)
+PERCENT_AB = 0.17  # Beispielwert: 15% der Strecke AB
+PERCENT_BC = -0.07  # Beispielwert: 10% der Strecke BC
+
 # Funktionen
 def detect_pieces(image):
     results = piece_model.predict(image, conf=0.1, iou=0.3, imgsz=1400)
@@ -92,6 +96,19 @@ def calculate_point_D(A, B, C):
     BC = C - B
     D_calculated = A + BC
     return D_calculated
+
+def adjust_point_D(A, B, C, D_calculated, percent_AB=PERCENT_AB, percent_BC=PERCENT_BC):
+    # Berechnung der Vektoren AB und BC
+    AB = B - A
+    BC = C - B
+
+    # Berechnung des Korrekturvektors
+    correction_vector = percent_AB * AB + percent_BC * BC
+
+    # Anwenden des Korrekturvektors auf D_calculated
+    D_corrected = D_calculated + correction_vector
+
+    return D_corrected
 
 def sort_points(A, B, C, D):
     points = np.array([A, B, C, D])
@@ -329,7 +346,6 @@ def plot_board_with_move(fen, best_move):
 
     # Erzeuge ein SVG-Bild des Schachbretts mit dem Pfeil
     board_svg = chess.svg.board(board=board, size=400, arrows=arrows)
-
     # Speichere das SVG-Bild in einer temporären Datei
     with tempfile.NamedTemporaryFile('w', delete=False, suffix='.svg') as f:
         f.write(board_svg)
@@ -337,6 +353,37 @@ def plot_board_with_move(fen, best_move):
 
     # Öffne das SVG-Bild im Standard-Webbrowser
     webbrowser.open('file://' + os.path.realpath(svg_filename))
+
+def plot_points_with_correction(image, A, B, C, D_calculated, D_corrected):
+    fig, ax = plt.subplots(1, figsize=(8, 8))
+    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    colors = {'A': 'red', 'B': 'green', 'C': 'blue', 'D_calculated': 'yellow', 'D_corrected': 'magenta'}
+
+    # Zeichne die Punkte A, B, C
+    points = {'A': A, 'B': B, 'C': C}
+    for label, point in points.items():
+        ax.plot(point[0], point[1], 'o', color=colors[label])
+        ax.text(point[0], point[1], label, fontsize=12, color='white',
+                bbox=dict(facecolor=colors[label], alpha=0.5))
+
+    # Zeichne D_calculated
+    ax.plot(D_calculated[0], D_calculated[1], 'o', color=colors['D_calculated'])
+    ax.text(D_calculated[0], D_calculated[1], 'D_calculated', fontsize=12, color='white',
+            bbox=dict(facecolor=colors['D_calculated'], alpha=0.5))
+
+    # Zeichne D_corrected
+    ax.plot(D_corrected[0], D_corrected[1], 'o', color=colors['D_corrected'])
+    ax.text(D_corrected[0], D_corrected[1], 'D_corrected', fontsize=12, color='white',
+            bbox=dict(facecolor=colors['D_corrected'], alpha=0.5))
+
+    # Zeichne den Korrekturvektor als Pfeil von D_calculated zu D_corrected
+    ax.arrow(D_calculated[0], D_calculated[1],
+             D_corrected[0] - D_calculated[0], D_corrected[1] - D_calculated[1],
+             head_width=10, head_length=15, fc='magenta', ec='magenta', linestyle='--')
+
+    plt.title("Eckpunkte mit Korrektur des Punktes D")
+    plt.axis('off')
+    plt.show()
 
 def main():
     print("Schachbrett- und Figuren-Erkennung")
@@ -368,9 +415,11 @@ def main():
         C = detected_points["C"]
         D_calculated = calculate_point_D(A, B, C)
 
-        # Korrektur der Ecke D
-        correction_vector = np.array([324, 222])
-        D_corrected = D_calculated + correction_vector
+        # Anpassung des Punktes D mit dem dynamischen Korrekturvektor
+        D_corrected = adjust_point_D(A, B, C, D_calculated)
+
+        # Visualisierung von D_calculated und D_corrected mit Korrekturvektor
+        plot_points_with_correction(image, A, B, C, D_calculated, D_corrected)
 
         # Sortiere die Punkte
         sorted_points = sort_points(A, B, C, D_corrected.astype(int))
@@ -419,4 +468,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+# Beispielbildpfade:
 # C:/Test_Images_Yolo/IMG_zug1.jpeg
+# C:/Test_Images_Yolo/screenshot_video_1.png
+# C:/Test_Images_Yolo/IMG_6043_Pro_Max.jpg
+# C:/Test_Images_Yolo/IMG_6043_komisch.jpg
+# C:/Test_Images_Yolo/FA6BC7CD-4797-4807-A376-806540D92FE2_1_105_c.jpeg
