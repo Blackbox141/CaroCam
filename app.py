@@ -1,6 +1,3 @@
-
-# Update 03.11.24 - Code mit Korrekturvektor
-
 import streamlit as st
 import numpy as np
 import cv2
@@ -51,6 +48,10 @@ FEN_MAPPING = {
     'White Rook': 'R',
     'White Knight': 'N'
 }
+
+# Festlegen der festen Werte für den Korrekturvektor
+PERCENT_AB = 0.17  # Beispielwert: 17% der Strecke AB
+PERCENT_BC = -0.07  # Beispielwert: -7% der Strecke BC
 
 def detect_pieces(image):
     results = piece_model.predict(image, conf=0.1, iou=0.3, imgsz=1400)
@@ -116,6 +117,10 @@ def detect_player_turn(image):
     elif 'right' in labels:
         player_turn = 'right'
     else:
+        player_turn = None  # Fordere Benutzereingabe
+
+    # Überprüfe, ob 'hold' erkannt wurde
+    if 'hold' in labels:
         player_turn = None  # Fordere Benutzereingabe
 
     return player_turn, result
@@ -454,11 +459,7 @@ def main():
         C = detected_points["C"]
         D_calculated = calculate_point_D(A, B, C)
 
-        # Anpassung des Punktes D mit dem dynamischen Korrekturvektor
-        st.write("Anpassung des Punktes D mit dem dynamischen Korrekturvektor")
-        PERCENT_AB = st.slider("Prozentualer Anteil von AB (PERCENT_AB)", min_value=-1.0, max_value=1.0, value=0.17, step=0.01)
-        PERCENT_BC = st.slider("Prozentualer Anteil von BC (PERCENT_BC)", min_value=-1.0, max_value=1.0, value=-0.07, step=0.01)
-
+        # Anpassung des Punktes D mit dem festen Korrekturvektor
         D_corrected = adjust_point_D(A, B, C, D_calculated, PERCENT_AB, PERCENT_BC)
 
         # Sortiere die Punkte
@@ -485,9 +486,9 @@ def main():
         # Schritt 4b: Erkennung des Spielers am Zug
         player_turn, clock_result = detect_player_turn(image)
 
-        # Wenn der Spieler nicht erkannt wurde, fordere Benutzereingabe
+        # Wenn der Spieler nicht erkannt wurde oder 'hold' erkannt wurde, fordere Benutzereingabe
         if player_turn is None:
-            st.write("Konnte nicht erkennen, wer am Zug ist.")
+            st.write("Konnte nicht erkennen, wer am Zug ist oder die Uhr steht auf 'hold'.")
             player_input = st.selectbox("Bitte wählen Sie, wer am Zug ist:", ("Weiß", "Schwarz"))
             if player_input == "Weiß":
                 player_turn = 'white'
@@ -496,11 +497,11 @@ def main():
         else:
             st.write(f"Erkannter Spieler am Zug: {player_turn}")
 
-        # Mappe 'left' und 'right' zu 'w' und 'b' für die FEN-Notation
+        # Mappe 'left' und 'right' zu 'b' und 'w' für die FEN-Notation (left = Schwarz, right = Weiß)
         if player_turn == 'left':
-            player_to_move = 'b'  # Angenommen, 'left' entspricht Schwarz
+            player_to_move = 'b'  # 'left' entspricht Schwarz am Zug
         elif player_turn == 'right':
-            player_to_move = 'w'  # Angenommen, 'right' entspricht Weiss
+            player_to_move = 'w'  # 'right' entspricht Weiß am Zug
         elif player_turn == 'white':
             player_to_move = 'w'
         elif player_turn == 'black':
