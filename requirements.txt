@@ -8,3 +8,11 @@ torchvision
 opencv-python
 python-chess
 streamlit-image-coordinates
+streamlit
+numpy
+opencv-python
+matplotlib
+ultralytics
+requests
+python-chess
+Pillow
