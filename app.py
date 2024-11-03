@@ -255,7 +255,7 @@ def plot_clock_detections(image, result):
 
 def plot_transformed_pieces(image, midpoints, labels):
     fig, ax = plt.subplots(1, figsize=(8, 8))
-    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    ax.imshow(image)
 
     for point, label in zip(midpoints, labels):
         ax.plot(point[0], point[1], 'ro')  # Roter Punkt für die Figur
@@ -480,9 +480,24 @@ def main():
         transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
         transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
 
-        # Drehe das entzerrte Bild und die transformierten Mittelpunkte
-        rotated_warped_image = warped_image  # Keine zusätzliche Rotation
-        rotated_midpoints = transformed_midpoints
+        # Rotationslogik basierend auf der Spielerposition
+        height, width = warped_image.shape[:2]
+
+        if white_side == "Rechts":
+            # Weiß spielt rechts, Brett um 90 Grad drehen
+            rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_90_CLOCKWISE)
+            rotated_midpoints = np.zeros_like(transformed_midpoints)
+            rotated_midpoints[:, 0] = transformed_midpoints[:, 1]
+            rotated_midpoints[:, 1] = width - transformed_midpoints[:, 0]
+        elif white_side == "Links":
+            # Weiß spielt links, Brett um 270 Grad drehen (90 Grad gegen den Uhrzeigersinn)
+            rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            rotated_midpoints = np.zeros_like(transformed_midpoints)
+            rotated_midpoints[:, 0] = height - transformed_midpoints[:, 1]
+            rotated_midpoints[:, 1] = transformed_midpoints[:, 0]
+        else:
+            rotated_warped_image = warped_image
+            rotated_midpoints = transformed_midpoints
 
         # Schritt 4b: Erkennung des Spielers am Zug
         player_turn, clock_result = detect_player_turn(image)
