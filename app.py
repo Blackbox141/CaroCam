@@ -255,7 +255,7 @@ def plot_clock_detections(image, result):
 
 def plot_transformed_pieces(image, midpoints, labels):
     fig, ax = plt.subplots(1, figsize=(8, 8))
-    ax.imshow(image)
+    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 
     for point, label in zip(midpoints, labels):
         ax.plot(point[0], point[1], 'ro')  # Roter Punkt für die Figur
@@ -266,7 +266,7 @@ def plot_transformed_pieces(image, midpoints, labels):
     plt.axis('off')
     return fig  # Rückgabe des Figure-Objekts
 
-def plot_final_board(image, midpoints, labels, white_side):
+def plot_final_board(image, midpoints, labels):
     grid_size = 8
     step_size = image.shape[0] // grid_size  # Größe jeder Zelle
 
@@ -288,22 +288,13 @@ def plot_final_board(image, midpoints, labels, white_side):
     # Zeichne die Figuren in ihren entsprechenden Feldern
     for point, label in zip(midpoints, labels):
         x, y = point
-
         col = int(x // step_size)
         row = int(y // step_size)
 
-        # Anpassung von Zeile und Spalte basierend auf white_side
-        if white_side == "Links":
-            adjusted_col = grid_size - 1 - col
-            adjusted_row = grid_size - 1 - row
-        else:
-            adjusted_col = col
-            adjusted_row = row
-
         # Prüfe, ob die Position innerhalb der Grenzen liegt
-        if 0 <= adjusted_row < grid_size and 0 <= adjusted_col < grid_size:
-            square_x = adjusted_col * step_size + step_size / 2
-            square_y = adjusted_row * step_size + step_size / 2
+        if 0 <= row < grid_size and 0 <= col < grid_size:
+            square_x = col * step_size + step_size / 2
+            square_y = row * step_size + step_size / 2
 
             ax.text(square_x, square_y, FEN_MAPPING[label], fontsize=20, color='red', ha='center', va='center')
         else:
@@ -314,38 +305,29 @@ def plot_final_board(image, midpoints, labels, white_side):
     plt.axis('off')
     return fig  # Rückgabe des Figure-Objekts
 
-def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w', white_side='Rechts'):
-    # Erstelle ein leeres Schachbrett (8x8) in Form einer Liste
+def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
+    # Erstelle ein leeres Schachbrett (8x8) als Liste von Listen
     board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
 
     step_size = 800 // grid_size  # Größe jeder Zelle (entspricht der Größe des entzerrten Bildes)
 
-    # Fülle das Board mit den Figuren
+    # Fülle das Board mit den Figuren basierend auf den erkannten Mittelpunkten
     for point, label in zip(midpoints, labels):
         x, y = point
-
         col = int(x // step_size)
         row = int(y // step_size)
 
-        # Anpassung von Zeile und Spalte basierend auf white_side
-        if white_side == "Links":
-            adjusted_col = grid_size - 1 - col
-            adjusted_row = grid_size - 1 - row
-        else:
-            adjusted_col = col
-            adjusted_row = row
-
         # Prüfe, ob die Position innerhalb der Grenzen liegt
-        if 0 <= adjusted_row < grid_size and 0 <= adjusted_col < grid_size:
+        if 0 <= row < grid_size and 0 <= col < grid_size:
             fen_char = FEN_MAPPING.get(label, '')
-            board[adjusted_row][adjusted_col] = fen_char
+            board[row][col] = fen_char
         else:
             # Ignoriere Figuren außerhalb des Schachbretts
             st.write(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist außerhalb des Schachbretts und wird ignoriert.")
 
-    # Erstelle die FEN-Notation
+    # Erstelle die FEN-Notation ohne Rotationen oder Spiegelungen
     fen_rows = []
-    for row in reversed(board):  # Reihenfolge der Reihen umkehren für FEN
+    for row in board:
         fen_row = ''
         empty_count = 0
         for square in row:
@@ -360,6 +342,7 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w', 
             fen_row += str(empty_count)
         fen_rows.append(fen_row)
 
+    # Verbinde alle Zeilen mit Schrägstrichen und füge die zusätzlichen Informationen hinzu
     fen_string = '/'.join(fen_rows) + f" {player_to_move} - - 0 1"
 
     return fen_string
@@ -497,8 +480,8 @@ def main():
         transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
         transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
 
-        # Kein weiteres Drehen des entzerrten Bildes
-        rotated_warped_image = warped_image
+        # Drehe das entzerrte Bild und die transformierten Mittelpunkte
+        rotated_warped_image = warped_image  # Keine zusätzliche Rotation
         rotated_midpoints = transformed_midpoints
 
         # Schritt 4b: Erkennung des Spielers am Zug
@@ -533,7 +516,7 @@ def main():
             player_to_move = 'b'
 
         # Schritt 5: Generiere die FEN-Notation
-        fen_string = generate_fen_from_board(rotated_midpoints, piece_labels, player_to_move=player_to_move, white_side=white_side)
+        fen_string = generate_fen_from_board(rotated_midpoints, piece_labels, player_to_move=player_to_move)
         st.write(f"**FEN-Notation:** {fen_string}")
 
         # Schritt 6: Analyse der FEN-Notation mit der Stockfish API
@@ -569,7 +552,7 @@ def main():
             st.pyplot(fig4)
 
             st.subheader("Schachbrett mit Figurenpositionen")
-            fig5 = plot_final_board(rotated_warped_image, rotated_midpoints, piece_labels, white_side)
+            fig5 = plot_final_board(rotated_warped_image, rotated_midpoints, piece_labels)
             st.pyplot(fig5)
 
             st.subheader("Erkannte Schachuhr Labels")
