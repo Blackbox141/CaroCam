@@ -325,6 +325,9 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
             # Ignoriere Figuren außerhalb des Schachbretts
             st.write(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist außerhalb des Schachbretts und wird ignoriert.")
 
+    # **Hier die Reihenfolge der Reihen umkehren, um die FEN-Notation korrekt zu erstellen**
+    board = board[::-1]  # Reihenfolge der Reihen umkehren
+
     # Erstelle die FEN-Notation ohne Rotationen oder Spiegelungen
     fen_rows = []
     for row in board:
