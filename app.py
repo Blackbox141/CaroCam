@@ -314,7 +314,7 @@ def plot_final_board(image, midpoints, labels, white_side):
     plt.title("Schachbrett mit Figurenpositionen")
     plt.axis('off')
     return fig  # Rückgabe des Figure-Objekts
-
+'''
 def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w', white_side='Rechts'):
     # Erstelle ein leeres Schachbrett (8x8) in Form einer Liste
     board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
@@ -371,14 +371,56 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w', 
     fen_string = '/'.join(fen_rows) + f" {player_to_move} - - 0 1"
 
     return fen_string
+'''
+def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
+    # Erstelle ein leeres Schachbrett (8x8) in Form einer Liste
+    board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
 
-def analyze_fen_with_stockfish(fen, depth=15):
+    step_size = 800 // grid_size  # Größe jeder Zelle (entspricht der Größe des entzerrten Bildes)
+
+    # Fülle das Board mit den Figuren
+    for point, label in zip(midpoints, labels):
+        x, y = point
+        col = int(x // step_size)
+        row = int(y // step_size)
+
+        # Prüfe, ob die Position innerhalb der Grenzen liegt
+        if 0 <= row < grid_size and 0 <= col < grid_size:
+            fen_char = FEN_MAPPING.get(label, '')
+            board[row][col] = fen_char
+        else:
+            # Ignoriere Figuren außerhalb des Schachbretts
+            st.write(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist außerhalb des Schachbretts und wird ignoriert.")
+
+    # Erstelle die FEN-Notation
+    fen_rows = []
+    for row in board:
+        fen_row = ''
+        empty_count = 0
+        for square in row:
+            if square == '':
+                empty_count += 1
+            else:
+                if empty_count > 0:
+                    fen_row += str(empty_count)
+                    empty_count = 0
+                fen_row += square
+        if empty_count > 0:
+            fen_row += str(empty_count)
+        fen_rows.append(fen_row)
+
+    # Verbinde alle Zeilen mit Schrägstrichen und hänge die Informationen an
+    fen_string = '/'.join(fen_rows) + f" {player_to_move} - - 0 1"
+
+    return fen_string
+
+def analyze_fen_with_stockfish(fen, depth=5):
     url = 'https://stockfish.online/api/s/v2.php'
 
     # URL mit den Parametern FEN und Tiefe aufbauen
     params = {
         'fen': fen,
-        'depth': min(depth, 15)  # Tiefe darf nicht größer als 15 sein
+        'depth': min(depth, 5)  # Tiefe darf nicht größer als 15 sein
     }
 
     try:
