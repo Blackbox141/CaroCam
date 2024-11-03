@@ -179,34 +179,22 @@ def sort_points(A, B, C, D):
     # Sortiere die Punkte nach der y-Koordinate (oben und unten)
     points = sorted(points, key=lambda x: x[1])
     # Sortiere die oberen Punkte nach der x-Koordinate
-    top_points = sorted(points[:2], key=lambda x: x[0])  # Obere Punkte
+    top_points = sorted(points[:2], key=lambda x: x[0])  # Obere Punkte (A und D)
     # Sortiere die unteren Punkte nach der x-Koordinate
-    bottom_points = sorted(points[2:], key=lambda x: x[0])  # Untere Punkte
-    # Rückgabe der sortierten Punkte
-    return np.array(top_points + bottom_points, dtype=np.float32)
+    bottom_points = sorted(points[2:], key=lambda x: x[0])  # Untere Punkte (B und C)
+    # Weisen den sortierten Punkten die richtige Position zu
+    A_sorted, D_sorted = top_points  # A ist oben links, D ist oben rechts
+    B_sorted, C_sorted = bottom_points  # B ist unten links, C ist unten rechts
+    return np.array([A_sorted, B_sorted, C_sorted, D_sorted], dtype=np.float32)
 
-def warp_perspective(image, src_points, white_side):
+def warp_perspective(image, src_points):
     dst_size = 800  # Zielgröße 800x800 Pixel für das quadratische Schachbrett
-
-    # Mapping der Ecken basierend auf der Seite, auf der Weiß spielt
-    if white_side == "Links":
-        # Wenn Weiß links spielt, bleibt die Standardzuordnung
-        dst_points = np.array([
-            [0, 0],  # A' (oben links)
-            [0, dst_size - 1],  # B' (unten links)
-            [dst_size - 1, dst_size - 1],  # C' (unten rechts)
-            [dst_size - 1, 0],  # D' (oben rechts)
-        ], dtype=np.float32)
-    else:
-        # Wenn Weiß rechts spielt, muss das Schachbrett gespiegelt werden
-        # Vertausche die Ecken entsprechend
-        src_points = np.array([src_points[1], src_points[2], src_points[3], src_points[0]])
-        dst_points = np.array([
-            [0, 0],  # A' (oben links)
-            [0, dst_size - 1],  # B' (unten links)
-            [dst_size - 1, dst_size - 1],  # C' (unten rechts)
-            [dst_size - 1, 0],  # D' (oben rechts)
-        ], dtype=np.float32)
+    dst_points = np.array([
+        [0, 0],  # A' (oben links)
+        [0, dst_size - 1],  # B' (unten links)
+        [dst_size - 1, dst_size - 1],  # C' (unten rechts)
+        [dst_size - 1, 0]  # D' (oben rechts)
+    ], dtype=np.float32)
 
     # Perspektivtransformation berechnen
     M = cv2.getPerspectiveTransform(src_points, dst_points)
@@ -215,6 +203,17 @@ def warp_perspective(image, src_points, white_side):
     warped_image = cv2.warpPerspective(image, M, (dst_size, dst_size))
 
     return warped_image, M
+
+def rotate_image(image, angle):
+    if angle == 0:
+        return image
+    else:
+        # Drehung um den Mittelpunkt des Bildes
+        (h, w) = image.shape[:2]
+        center = (w // 2, h // 2)
+        M = cv2.getRotationMatrix2D(center, angle, 1.0)
+        rotated = cv2.warpAffine(image, M, (w, h))
+        return rotated
 
 def plot_corners(image, points):
     fig, ax = plt.subplots(1, figsize=(8, 8))
@@ -454,7 +453,7 @@ def main():
             return
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        # Hochgeladenes Bild anzeigen
+        # Anzeige des hochgeladenen Bildes
         st.image(image_rgb, caption='Hochgeladenes Bild', use_column_width=True)
 
         # Benutzer wählt, ob Weiß links oder rechts spielt
@@ -482,7 +481,7 @@ def main():
         sorted_points = sort_points(A, B, C, D_corrected.astype(int))
 
         # Perspektivtransformation durchführen
-        warped_image, M = warp_perspective(image_rgb, sorted_points, white_side)
+        warped_image, M = warp_perspective(image_rgb, sorted_points)
         # Wir zeigen diese Ergebnisse später an
 
         # Schritt 4: Schachfiguren transformieren und visualisieren
@@ -492,7 +491,17 @@ def main():
         transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
         transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
 
-        # Kein zusätzliches Drehen des entzerrten Bildes erforderlich
+        # Drehe das entzerrte Bild und die transformierten Mittelpunkte
+        # Überprüfe, ob das Brett um 180 Grad gedreht werden muss
+        if white_side == "Links":
+            rotated_warped_image = rotate_image(warped_image, 180)
+            # Aktualisiere die Mittelpunkte der Figuren entsprechend der Drehung
+            rotated_midpoints = np.zeros_like(transformed_midpoints)
+            rotated_midpoints[:, 0] = warped_image.shape[1] - transformed_midpoints[:, 0]
+            rotated_midpoints[:, 1] = warped_image.shape[0] - transformed_midpoints[:, 1]
+        else:
+            rotated_warped_image = warped_image
+            rotated_midpoints = transformed_midpoints
 
         # Schritt 4b: Erkennung des Spielers am Zug
         player_turn, clock_result = detect_player_turn(image)
@@ -526,7 +535,7 @@ def main():
             player_to_move = 'b'
 
         # Schritt 5: Generiere die FEN-Notation
-        fen_string = generate_fen_from_board(transformed_midpoints, piece_labels, player_to_move=player_to_move)
+        fen_string = generate_fen_from_board(rotated_midpoints, piece_labels, player_to_move=player_to_move)
         st.write(f"**FEN-Notation:** {fen_string}")
 
         # Schritt 6: Analyse der FEN-Notation mit der Stockfish API
@@ -558,11 +567,11 @@ def main():
             st.pyplot(fig3)
 
             st.subheader("Transformierte Schachfiguren auf dem entzerrten Schachbrett")
-            fig4 = plot_transformed_pieces(warped_image, transformed_midpoints, piece_labels)
+            fig4 = plot_transformed_pieces(rotated_warped_image, rotated_midpoints, piece_labels)
             st.pyplot(fig4)
 
             st.subheader("Schachbrett mit Figurenpositionen")
-            fig5 = plot_final_board(warped_image, transformed_midpoints, piece_labels)
+            fig5 = plot_final_board(rotated_warped_image, rotated_midpoints, piece_labels)
             st.pyplot(fig5)
 
             st.subheader("Erkannte Schachuhr Labels")
