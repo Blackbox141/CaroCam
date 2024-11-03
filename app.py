@@ -433,6 +433,10 @@ def plot_board_with_move(fen, best_move):
 def main():
     st.title("Schachbrett- und Figuren-Erkennung")
 
+    # Benutzer wählt, ob Weiß links oder rechts spielt
+    st.subheader("Spielerpositionen")
+    white_side = st.selectbox("Auf welcher Seite spielt Weiß?", ("Links", "Rechts"))
+
     # Bild hochladen
     uploaded_file = st.file_uploader("Lade ein Bild des Schachbretts hoch", type=["jpg", "jpeg", "png"])
 
@@ -486,7 +490,7 @@ def main():
         # Schritt 4b: Erkennung des Spielers am Zug
         player_turn, clock_result = detect_player_turn(image)
 
-        # Wenn der Spieler nicht erkannt wurde oder 'hold' erkannt wurde, fordere Benutzereingabe
+        # Mappe 'left' und 'right' zu Spielern basierend auf der Position von Weiß
         if player_turn is None:
             st.write("Konnte nicht erkennen, wer am Zug ist oder die Uhr steht auf 'hold'.")
             player_input = st.selectbox("Bitte wählen Sie, wer am Zug ist:", ("Weiß", "Schwarz"))
@@ -495,14 +499,21 @@ def main():
             else:
                 player_turn = 'black'
         else:
-            st.write(f"Erkannter Spieler am Zug: {player_turn}")
+            st.write(f"Erkannter Uhrenseite am Zug: {player_turn}")
+            if white_side == "Links":
+                if player_turn == 'left':
+                    player_turn = 'white'
+                else:
+                    player_turn = 'black'
+            else:  # Weiß spielt rechts
+                if player_turn == 'right':
+                    player_turn = 'white'
+                else:
+                    player_turn = 'black'
+            st.write(f"Basierend auf der Spielerposition ist {player_turn.capitalize()} am Zug.")
 
-        # Mappe 'left' und 'right' zu 'b' und 'w' für die FEN-Notation (left = Schwarz, right = Weiß)
-        if player_turn == 'left':
-            player_to_move = 'b'  # 'left' entspricht Schwarz am Zug
-        elif player_turn == 'right':
-            player_to_move = 'w'  # 'right' entspricht Weiß am Zug
-        elif player_turn == 'white':
+        # Mappe 'white' und 'black' zu 'w' und 'b' für die FEN-Notation
+        if player_turn == 'white':
             player_to_move = 'w'
         elif player_turn == 'black':
             player_to_move = 'b'
