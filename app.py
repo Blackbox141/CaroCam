@@ -402,7 +402,7 @@ def analyze_fen_with_stockfish(fen, depth=15):
 
     return None  # Falls kein Zug empfohlen wurde
 
-def plot_board_with_move(fen, best_move):
+def plot_board_with_move(fen, best_move, white_side):
     import chess
     import chess.svg
 
@@ -421,8 +421,20 @@ def plot_board_with_move(fen, best_move):
         st.write("Kein Zug wurde empfohlen oder der Zug ist ungültig.")
         arrows = []
 
+    # Setze das Brett auf die entsprechende Perspektive
+    if white_side == "Links":
+        flipped = True  # Brett aus der Sicht von Schwarz
+    else:
+        flipped = False  # Brett aus der Sicht von Weiß
+
     # Erzeuge ein SVG-Bild des Schachbretts mit dem Pfeil
-    board_svg = chess.svg.board(board=board, size=400, arrows=arrows)
+    board_svg = chess.svg.board(
+        board=board,
+        size=400,
+        arrows=arrows,
+        flipped=flipped,  # Brett drehen, wenn nötig
+        coordinates=True
+    )
 
     # Anzeige des SVG-Bildes in Streamlit
     st.components.v1.html(board_svg, height=500)
@@ -539,7 +551,7 @@ def main():
 
         # Schritt 7: Darstellung der FEN-Notation mit dem empfohlenen Zug
         st.subheader("Empfohlenes Schachbrett mit Zugempfehlung")
-        plot_board_with_move(fen_string, best_move)
+        plot_board_with_move(fen_string, best_move, white_side)
 
         # Optionale Anzeige der Zwischenschritte
         if st.button("Zwischenschritte anzeigen"):
