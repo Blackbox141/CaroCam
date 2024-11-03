@@ -174,12 +174,8 @@ def plot_points_with_correction(image, A, B, C, D_calculated, D_corrected):
     plt.axis('off')
     return fig  # Rückgabe des Figure-Objekts
 
-def warp_perspective(image, src_points, dst_points):
-    # Perspektivtransformation berechnen
-    M = cv2.getPerspectiveTransform(src_points, dst_points)
-    # Perspektivtransformation anwenden
-    warped_image = cv2.warpPerspective(image, M, (800, 800))
-    return warped_image, M
+def rotate_image(image):
+    return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
 
 def plot_corners(image, points):
     fig, ax = plt.subplots(1, figsize=(8, 8))
@@ -410,21 +406,21 @@ def plot_board_with_move(fen, best_move):
 def get_src_dst_points(A, B, C, D, white_side, dst_size=800):
     if white_side == "Links":
         # Weiß spielt links, A1 ist an Ecke D
-        src_points = np.array([D, C, B, A], dtype=np.float32)
+        src_points = np.array([A, B, C, D], dtype=np.float32)
         dst_points = np.array([
-            [0, dst_size - 1],    # D (A1) -> unten links
-            [dst_size - 1, dst_size - 1],  # C -> unten rechts
-            [dst_size - 1, 0],    # B -> oben rechts
-            [0, 0]                # A -> oben links
+            [dst_size - 1, 0],    # A -> oben rechts
+            [dst_size - 1, dst_size - 1],  # B -> unten rechts
+            [0, dst_size - 1],    # C -> unten links
+            [0, 0]                # D -> oben links
         ], dtype=np.float32)
     else:
         # Weiß spielt rechts, A1 ist an Ecke B
-        src_points = np.array([B, A, D, C], dtype=np.float32)
+        src_points = np.array([B, C, D, A], dtype=np.float32)
         dst_points = np.array([
-            [0, dst_size - 1],    # B (A1) -> unten links
-            [dst_size - 1, dst_size - 1],  # A -> unten rechts
-            [dst_size - 1, 0],    # D -> oben rechts
-            [0, 0]                # C -> oben links
+            [dst_size - 1, 0],    # B -> oben rechts
+            [dst_size - 1, dst_size - 1],  # C -> unten rechts
+            [0, dst_size - 1],    # D -> unten links
+            [0, 0]                # A -> oben links
         ], dtype=np.float32)
     return src_points, dst_points
 
@@ -472,7 +468,8 @@ def main():
         src_points, dst_points = get_src_dst_points(A, B, C, D, white_side)
 
         # Perspektivtransformation durchführen
-        warped_image, M = warp_perspective(image_rgb, src_points, dst_points)
+        warped_image, M = cv2.findHomography(src_points, dst_points)
+        warped_image = cv2.warpPerspective(image_rgb, M, (800, 800))
 
         # Schachfiguren transformieren
         ones = np.ones((piece_midpoints.shape[0], 1))
@@ -480,6 +477,12 @@ def main():
         transformed_midpoints = M @ piece_midpoints_homogeneous.T
         transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
         transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
+
+        # Drehe das Bild um 90 Grad
+        warped_image = rotate_image(warped_image)
+        transformed_midpoints_rotated = np.zeros_like(transformed_midpoints)
+        transformed_midpoints_rotated[:, 0] = transformed_midpoints[:, 1]
+        transformed_midpoints_rotated[:, 1] = warped_image.shape[0] - transformed_midpoints[:, 0]
 
         # Schritt 4b: Erkennung des Spielers am Zug
         player_turn, clock_result = detect_player_turn(image)
@@ -513,7 +516,7 @@ def main():
             player_to_move = 'b'
 
         # Schritt 5: Generiere die FEN-Notation
-        fen_string = generate_fen_from_board(transformed_midpoints, piece_labels, player_to_move=player_to_move)
+        fen_string = generate_fen_from_board(transformed_midpoints_rotated, piece_labels, player_to_move=player_to_move)
         st.write(f"**FEN-Notation:** {fen_string}")
 
         # Schritt 6: Analyse der FEN-Notation mit der Stockfish API
@@ -545,11 +548,11 @@ def main():
             st.pyplot(fig3)
 
             st.subheader("Transformierte Schachfiguren auf dem entzerrten Schachbrett")
-            fig4 = plot_transformed_pieces(warped_image, transformed_midpoints, piece_labels)
+            fig4 = plot_transformed_pieces(warped_image, transformed_midpoints_rotated, piece_labels)
             st.pyplot(fig4)
 
             st.subheader("Schachbrett mit Figurenpositionen")
-            fig5 = plot_final_board(warped_image, transformed_midpoints, piece_labels)
+            fig5 = plot_final_board(warped_image, transformed_midpoints_rotated, piece_labels)
             st.pyplot(fig5)
 
             st.subheader("Erkannte Schachuhr Labels")
