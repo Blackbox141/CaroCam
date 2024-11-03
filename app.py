@@ -207,18 +207,6 @@ def warp_perspective(image, src_points):
 def rotate_image(image):
     return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
 
-def flip_board(image, midpoints):
-    # Spiegeln des Bildes
-    flipped_image = cv2.flip(image, -1)  # Flip around both axes
-
-    # Anpassung der Mittelpunkte
-    height, width, _ = image.shape
-    flipped_midpoints = np.copy(midpoints)
-    flipped_midpoints[:, 0] = width - midpoints[:, 0]
-    flipped_midpoints[:, 1] = height - midpoints[:, 1]
-
-    return flipped_image, flipped_midpoints
-
 def plot_corners(image, points):
     fig, ax = plt.subplots(1, figsize=(8, 8))
     ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
@@ -281,7 +269,7 @@ def plot_transformed_pieces(image, midpoints, labels):
     plt.axis('off')
     return fig  # Rückgabe des Figure-Objekts
 
-def plot_final_board(image, midpoints, labels):
+def plot_final_board(image, midpoints, labels, white_side):
     grid_size = 8
     step_size = image.shape[0] // grid_size  # Größe jeder Zelle
 
@@ -295,10 +283,17 @@ def plot_final_board(image, midpoints, labels):
 
     # Füge Koordinaten (A-H und 1-8) hinzu
     for i in range(grid_size):
-        ax.text(i * step_size + step_size / 2, image.shape[0] - 10, chr(65 + i),
-                fontsize=12, color='black', ha='center', va='center')
-        ax.text(10, i * step_size + step_size / 2, str(grid_size - i),
-                fontsize=12, color='black', ha='center', va='center')
+        if white_side == "Links":
+            # Beschriftung umkehren
+            ax.text(i * step_size + step_size / 2, image.shape[0] - 10, chr(72 - i),
+                    fontsize=12, color='black', ha='center', va='center')
+            ax.text(10, i * step_size + step_size / 2, str(i + 1),
+                    fontsize=12, color='black', ha='center', va='center')
+        else:
+            ax.text(i * step_size + step_size / 2, image.shape[0] - 10, chr(65 + i),
+                    fontsize=12, color='black', ha='center', va='center')
+            ax.text(10, i * step_size + step_size / 2, str(grid_size - i),
+                    fontsize=12, color='black', ha='center', va='center')
 
     # Zeichne die Figuren in ihren entsprechenden Feldern
     for point, label in zip(midpoints, labels):
@@ -320,7 +315,7 @@ def plot_final_board(image, midpoints, labels):
     plt.axis('off')
     return fig  # Rückgabe des Figure-Objekts
 
-def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
+def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w', white_side='Rechts'):
     # Erstelle ein leeres Schachbrett (8x8) in Form einer Liste
     board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
 
@@ -335,17 +330,32 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
         # Prüfe, ob die Position innerhalb der Grenzen liegt
         if 0 <= row < grid_size and 0 <= col < grid_size:
             fen_char = FEN_MAPPING.get(label, '')
-            board[row][col] = fen_char
+            if white_side == "Links":
+                # Indizes umkehren
+                board[row][col] = fen_char
+            else:
+                # Normale Zuordnung
+                board[row][col] = fen_char
         else:
             # Ignoriere Figuren außerhalb des Schachbretts
             st.write(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist außerhalb des Schachbretts und wird ignoriert.")
 
     # Erstelle die FEN-Notation
     fen_rows = []
-    for row in board:
+    if white_side == "Links":
+        # Reihenfolge der Zeilen umkehren
+        board_iter = board
+    else:
+        board_iter = reversed(board)
+
+    for row in board_iter:
         fen_row = ''
         empty_count = 0
-        for square in row:
+        if white_side == "Links":
+            row_iter = row
+        else:
+            row_iter = reversed(row)
+        for square in row_iter:
             if square == '':
                 empty_count += 1
             else:
@@ -457,7 +467,7 @@ def main():
             return
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        # Zeige das hochgeladene Bild an
+        # Bild anzeigen
         st.image(image_rgb, caption='Hochgeladenes Bild', use_column_width=True)
 
         # Benutzer wählt, ob Weiß links oder rechts spielt
@@ -496,18 +506,21 @@ def main():
         transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
 
         # Drehe das entzerrte Bild und die transformierten Mittelpunkte
-        rotated_warped_image = rotate_image(warped_image)
-
-        rotated_midpoints = np.zeros_like(transformed_midpoints)
-        rotated_midpoints[:, 0] = rotated_warped_image.shape[1] - transformed_midpoints[:, 1]
-        rotated_midpoints[:, 1] = transformed_midpoints[:, 0]
-
-        # Schritt 4b: Wenn Weiß links spielt, Spiegelung des Schachbretts und Anpassung der Mittelpunkte
         if white_side == "Links":
-            st.write("Weiß spielt links. Spiegeln des Schachbretts, um A1 auf die weiße Seite zu legen.")
-            rotated_warped_image, rotated_midpoints = flip_board(rotated_warped_image, rotated_midpoints)
+            # Weiß spielt links, Brett um 180 Grad drehen
+            rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_180)
+            # Transformierte Mittelpunkte anpassen
+            rotated_midpoints = np.zeros_like(transformed_midpoints)
+            rotated_midpoints[:, 0] = warped_image.shape[1] - transformed_midpoints[:, 0]
+            rotated_midpoints[:, 1] = warped_image.shape[0] - transformed_midpoints[:, 1]
+        else:
+            # Weiß spielt rechts, Brett um 90 Grad drehen
+            rotated_warped_image = rotate_image(warped_image)
+            rotated_midpoints = np.zeros_like(transformed_midpoints)
+            rotated_midpoints[:, 0] = rotated_warped_image.shape[1] - transformed_midpoints[:, 1]
+            rotated_midpoints[:, 1] = transformed_midpoints[:, 0]
 
-        # Schritt 5: Erkennung des Spielers am Zug
+        # Schritt 4b: Erkennung des Spielers am Zug
         player_turn, clock_result = detect_player_turn(image)
 
         # Mappe 'left' und 'right' zu Spielern basierend auf der Position von Weiß
@@ -538,24 +551,14 @@ def main():
         elif player_turn == 'black':
             player_to_move = 'b'
 
-        # Schritt 6: Generiere die FEN-Notation
-        fen_string = generate_fen_from_board(rotated_midpoints, piece_labels, player_to_move=player_to_move)
-
-        # Wenn Weiß links spielt, müssen wir die FEN-Notation umdrehen
-        if white_side == "Links":
-            st.write("Weiß spielt links. Umdrehen der FEN-Notation.")
-            fen_parts = fen_string.split(' ')
-            fen_rows = fen_parts[0].split('/')
-            reversed_rows = fen_rows[::-1]
-            fen_parts[0] = '/'.join(reversed_rows)
-            fen_string = ' '.join(fen_parts)
-
+        # Schritt 5: Generiere die FEN-Notation
+        fen_string = generate_fen_from_board(rotated_midpoints, piece_labels, player_to_move=player_to_move, white_side=white_side)
         st.write(f"**FEN-Notation:** {fen_string}")
 
-        # Schritt 7: Analyse der FEN-Notation mit der Stockfish API
+        # Schritt 6: Analyse der FEN-Notation mit der Stockfish API
         best_move = analyze_fen_with_stockfish(fen_string)
 
-        # Schritt 8: Darstellung der FEN-Notation mit dem empfohlenen Zug
+        # Schritt 7: Darstellung der FEN-Notation mit dem empfohlenen Zug
         st.subheader("Empfohlenes Schachbrett mit Zugempfehlung")
         plot_board_with_move(fen_string, best_move)
 
@@ -585,7 +588,7 @@ def main():
             st.pyplot(fig4)
 
             st.subheader("Schachbrett mit Figurenpositionen")
-            fig5 = plot_final_board(rotated_warped_image, rotated_midpoints, piece_labels)
+            fig5 = plot_final_board(rotated_warped_image, rotated_midpoints, piece_labels, white_side)
             st.pyplot(fig5)
 
             st.subheader("Erkannte Schachuhr Labels")
