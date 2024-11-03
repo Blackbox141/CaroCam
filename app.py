@@ -205,7 +205,7 @@ def warp_perspective(image, src_points):
     return warped_image, M
 
 def rotate_image(image):
-    return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+    return cv2.rotate(image, cv2.ROTATE_0_CLOCKWISE)
 
 def plot_corners(image, points):
     fig, ax = plt.subplots(1, figsize=(8, 8))
@@ -508,7 +508,7 @@ def main():
         # Drehe das entzerrte Bild und die transformierten Mittelpunkte
         if white_side == "Links":
             # Weiß spielt links, Brett um 180 Grad drehen
-            rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_180)
+            rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_0)
             # Transformierte Mittelpunkte anpassen
             rotated_midpoints = np.zeros_like(transformed_midpoints)
             rotated_midpoints[:, 0] = warped_image.shape[1] - transformed_midpoints[:, 0]
