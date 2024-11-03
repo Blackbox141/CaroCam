@@ -287,12 +287,12 @@ def plot_final_board(image, midpoints, labels, white_side):
             # Beschriftung umkehren
             ax.text(i * step_size + step_size / 2, image.shape[0] - 10, chr(72 - i),
                     fontsize=12, color='black', ha='center', va='center')
-            ax.text(10, i * step_size + step_size / 2, str(i + 1),
+            ax.text(10, i * step_size + step_size / 2, str(grid_size - i),
                     fontsize=12, color='black', ha='center', va='center')
         else:
             ax.text(i * step_size + step_size / 2, image.shape[0] - 10, chr(65 + i),
                     fontsize=12, color='black', ha='center', va='center')
-            ax.text(10, i * step_size + step_size / 2, str(grid_size - i),
+            ax.text(10, i * step_size + step_size / 2, str(i + 1),
                     fontsize=12, color='black', ha='center', va='center')
 
     # Zeichne die Figuren in ihren entsprechenden Feldern
@@ -330,12 +330,7 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w', 
         # Prüfe, ob die Position innerhalb der Grenzen liegt
         if 0 <= row < grid_size and 0 <= col < grid_size:
             fen_char = FEN_MAPPING.get(label, '')
-            if white_side == "Links":
-                # Indizes umkehren
-                board[row][col] = fen_char
-            else:
-                # Normale Zuordnung
-                board[row][col] = fen_char
+            board[row][col] = fen_char
         else:
             # Ignoriere Figuren außerhalb des Schachbretts
             st.write(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist außerhalb des Schachbretts und wird ignoriert.")
@@ -343,18 +338,18 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w', 
     # Erstelle die FEN-Notation
     fen_rows = []
     if white_side == "Links":
-        # Reihenfolge der Zeilen umkehren
-        board_iter = board
-    else:
+        # Reihenfolge der Zeilen und Spalten umkehren
         board_iter = reversed(board)
+    else:
+        board_iter = board
 
     for row in board_iter:
         fen_row = ''
         empty_count = 0
         if white_side == "Links":
-            row_iter = row
-        else:
             row_iter = reversed(row)
+        else:
+            row_iter = row
         for square in row_iter:
             if square == '':
                 empty_count += 1
@@ -508,7 +503,7 @@ def main():
         # Drehe das entzerrte Bild und die transformierten Mittelpunkte
         if white_side == "Links":
             # Weiß spielt links, Brett um 180 Grad drehen
-            rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_180)
             # Transformierte Mittelpunkte anpassen
             rotated_midpoints = np.zeros_like(transformed_midpoints)
             rotated_midpoints[:, 0] = warped_image.shape[1] - transformed_midpoints[:, 0]
