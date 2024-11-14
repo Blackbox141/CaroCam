@@ -196,11 +196,8 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
             pass
 
     # Reihenfolge der Reihen umkehren, um die FEN-Notation korrekt zu erstellen
-    board = board[::-1]
-
-    # Spalten in jeder Reihe umkehren, um die Spiegelung zu beheben
-    for row in board:
-        row.reverse()
+    # Entferne das Umkehren der Reihen, um die Orientierung zu korrigieren
+    # board = board[::-1]
 
     # Erstelle die FEN-Notation
     fen_rows = []
@@ -293,9 +290,9 @@ def plot_board_with_move(fen, best_move, white_side):
 
     # Setze das Brett auf die entsprechende Perspektive
     if white_side == "Links":
-        flipped = True  # Brett aus der Sicht von Schwarz
-    else:
         flipped = False  # Brett aus der Sicht von Weiß
+    else:
+        flipped = True  # Brett aus der Sicht von Schwarz
 
     # Erzeuge ein SVG-Bild des Schachbretts mit dem Pfeil
     board_svg = chess.svg.board(
@@ -323,7 +320,7 @@ def save_game_to_pgn(moves, starting_fen):
     return pgn_string
 
 def main():
-    st.title("Schachspiel Analyse aus Video2")
+    st.title("Schachspiel Analyse aus Video3")
 
     # Video hochladen
     uploaded_file = st.file_uploader("Lade ein Video des Schachspiels hoch", type=["mp4", "avi", "mov"])
@@ -335,6 +332,10 @@ def main():
 
         cap = cv2.VideoCapture(tfile.name)
 
+        # Framerate des Videos erhalten
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_interval = int(fps) if fps > 0 else 25  # Standardmäßig 25, falls fps nicht ermittelt werden kann
+
         # Variablen initialisieren
         previous_fen = None
         move_list = []
@@ -343,6 +344,7 @@ def main():
         white_side = None
         user_white_side = None  # Variable, um zu speichern, ob der Benutzer die Seite gewählt hat
         game_over = False
+        frame_count = 0
 
         # Video durchlaufen
         while cap.isOpened() and not game_over:
@@ -350,14 +352,23 @@ def main():
             if not ret:
                 break
 
+            frame_count += 1
+
+            # Analysiere nur jede Sekunde
+            if frame_count % frame_interval != 0:
+                continue  # Überspringe dieses Frame
+
             # Konvertiere das Frame in RGB
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
+            # Bild anzeigen
+            st.image(frame_rgb, caption=f'Analysiertes Frame {frame_count}', use_column_width=True)
+
             # Schritt 1: Erkennung der Schachfiguren
-            piece_midpoints, piece_labels, piece_results = detect_pieces(frame)
+            piece_midpoints, piece_labels, piece_results = detect_pieces(frame_rgb)
 
             # Schritt 2: Erkennung der Eckpunkte
-            detected_points, corner_results = detect_corners(frame)
+            detected_points, corner_results = detect_corners(frame_rgb)
 
             # Schritt 3: Berechnung der Ecke D und Perspektivtransformation
             A = detected_points["A"]
@@ -381,8 +392,27 @@ def main():
             transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
             transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
 
+            # Rotationslogik basierend auf der Spielerposition
+            height, width = warped_image.shape[:2]
+
+            if white_side == "Rechts":
+                # Weiß spielt rechts, Brett um 90 Grad drehen
+                rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_90_CLOCKWISE)
+                rotated_midpoints = np.zeros_like(transformed_midpoints)
+                rotated_midpoints[:, 0] = transformed_midpoints[:, 1]
+                rotated_midpoints[:, 1] = width - transformed_midpoints[:, 0]
+            elif white_side == "Links":
+                # Weiß spielt links, Brett um 270 Grad drehen (90 Grad gegen den Uhrzeigersinn)
+                rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                rotated_midpoints = np.zeros_like(transformed_midpoints)
+                rotated_midpoints[:, 0] = height - transformed_midpoints[:, 1]
+                rotated_midpoints[:, 1] = transformed_midpoints[:, 0]
+            else:
+                rotated_warped_image = warped_image
+                rotated_midpoints = transformed_midpoints
+
             # Schritt 3: Prüfung der Brettorientierung
-            current_fen = generate_fen_from_board(transformed_midpoints, piece_labels)
+            current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
             board = chess.Board(current_fen)
 
             if not game_started:
@@ -393,6 +423,7 @@ def main():
                     white_side = "Links"  # Standardmäßig
                 else:
                     # Drehe das Brett um 180 Grad und prüfe erneut
+                    board = chess.Board(current_fen)
                     board.transform(chess.flip_horizontal).transform(chess.flip_vertical)
                     flipped_fen = board.fen()
                     if flipped_fen.startswith(STARTING_FEN):
@@ -409,7 +440,7 @@ def main():
                         starting_position = current_fen  # Oder eine andere Logik
             else:
                 # Schritt 4: Analyse der Schachuhr
-                player_turn, clock_result = detect_player_turn(frame)
+                player_turn, clock_result = detect_player_turn(frame_rgb)
 
                 if player_turn == 'hold':
                     continue  # Springe zu Schritt 4 (nächste Iteration)
@@ -425,7 +456,7 @@ def main():
                         # Speichere das aktuelle Frame (optional)
                         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                         image_path = f"schachbrett_{timestamp}.png"
-                        cv2.imwrite(image_path, cv2.cvtColor(warped_image, cv2.COLOR_RGB2BGR))
+                        cv2.imwrite(image_path, cv2.cvtColor(rotated_warped_image, cv2.COLOR_RGB2BGR))
                         st.write(f"Bild gespeichert: {image_path}")
 
                         # Prüfe auf Schachmatt
@@ -447,7 +478,7 @@ def main():
                             # Wiederhole Schritt 4
                             pass
 
-            # Warte kurz, um die GUI nicht zu überlasten
+            # Kurze Pause, um die GUI nicht zu überlasten
             time.sleep(0.1)
 
         cap.release()
