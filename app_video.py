@@ -68,6 +68,7 @@ def detect_pieces(image):
         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
         cls_id = int(box.cls.cpu().numpy()[0])
         label = class_names[cls_id]
+        conf = box.conf.cpu().numpy()[0] * 100  # Confidence Score in Prozent
 
         # Berechnung des Mittelpunkts der unteren Hälfte der Bounding Box
         mid_x = x1 + (x2 - x1) / 2
@@ -76,9 +77,10 @@ def detect_pieces(image):
         midpoints.append([mid_x, mid_y])
         labels.append(label)
 
-        # Zeichne die Bounding Box und das Label auf das Bild
+        # Zeichne die Bounding Box und das Label mit Confidence Score auf das Bild
         cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-        cv2.putText(image, label, (int(mid_x), int(mid_y)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
+        text = f"{label}: {conf:.1f}%"
+        cv2.putText(image, text, (int(x1), int(y1)-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
 
     return np.array(midpoints), labels, image
 
@@ -307,7 +309,7 @@ def plot_board_with_move(fen, best_move, white_side):
     if white_side == "Links":
         flipped = False  # Brett aus der Sicht von Weiß
     else:
-        flipped = True  # Brett aus der Sicht von Schwarz
+        flipped = True  # Brett drehen
 
     # Erzeuge ein SVG-Bild des Schachbretts mit dem Pfeil
     board_svg = chess.svg.board(
@@ -335,7 +337,7 @@ def save_game_to_pgn(moves, starting_fen):
     return pgn_string
 
 def main():
-    st.title("Schachspiel Analyse aus 1")
+    st.title("Schachspiel Analyse aus Video")
 
     # Video hochladen
     uploaded_file = st.file_uploader("Lade ein Video des Schachspiels hoch", type=["mp4", "avi", "mov"])
@@ -440,47 +442,55 @@ def main():
                 transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
                 transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
 
-                # Rotationslogik basierend auf der Spielerposition
-                if white_side == "Rechts":
-                    # Weiß spielt rechts, Brett um 90 Grad drehen
-                    rotated_midpoints = np.zeros_like(transformed_midpoints)
-                    rotated_midpoints[:, 0] = transformed_midpoints[:, 1]
-                    rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 0]
-                elif white_side == "Links":
-                    # Weiß spielt links, Brett um 270 Grad drehen (90 Grad gegen den Uhrzeigersinn)
-                    rotated_midpoints = np.zeros_like(transformed_midpoints)
-                    rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 1]
-                    rotated_midpoints[:, 1] = transformed_midpoints[:, 0]
-                else:
-                    rotated_midpoints = transformed_midpoints
+                # Jetzt versuchen wir beide Rotationen
+                fen_found = False
 
-                # Schritt 3: Generiere FEN
-                current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
-                st.write(f"**Aktuelle FEN-Notation:** {current_fen}")
+                for side in ["Links", "Rechts"]:
+                    if side == "Links":
+                        # Weiß spielt links, keine Rotation
+                        rotated_midpoints = transformed_midpoints.copy()
+                    elif side == "Rechts":
+                        # Weiß spielt rechts, Brett um 180 Grad drehen
+                        rotated_midpoints = np.zeros_like(transformed_midpoints)
+                        rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 0]
+                        rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 1]
+                    else:
+                        rotated_midpoints = transformed_midpoints.copy()
 
-                # Überprüfe, ob das Spiel gestartet hat
-                if not game_started:
+                    # Generiere FEN
+                    current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
+                    st.write(f"**Aktuelle FEN-Notation ({side}):** {current_fen}")
+
+                    # Prüfe, ob es die Grundstellung ist
                     if current_fen.startswith(STARTING_FEN):
                         game_started = True
                         starting_position = current_fen
-                        white_side = "Links"  # Standardmäßig
+                        white_side = side
+                        fen_found = True
+                        break
+
+                if not fen_found:
+                    # Fordere Benutzereingabe
+                    if user_white_side is None:
+                        st.write("Bitte wählen Sie, auf welcher Seite Weiß spielt:")
+                        user_white_side = st.selectbox("Weiß spielt auf:", ("Links", "Rechts"))
+                        white_side = user_white_side
+
+                    # Rotierte Midpoints entsprechend der gewählten Seite
+                    if white_side == "Links":
+                        rotated_midpoints = transformed_midpoints.copy()
+                    elif white_side == "Rechts":
+                        rotated_midpoints = np.zeros_like(transformed_midpoints)
+                        rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 0]
+                        rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 1]
                     else:
-                        # Drehe das Brett um 180 Grad und prüfe erneut
-                        board = chess.Board(current_fen)
-                        board.transform(chess.flip_horizontal).transform(chess.flip_vertical)
-                        flipped_fen = board.fen()
-                        if flipped_fen.startswith(STARTING_FEN):
-                            game_started = True
-                            starting_position = flipped_fen
-                            white_side = "Rechts"
-                        else:
-                            # Fordere Benutzereingabe
-                            if user_white_side is None:
-                                st.write("Bitte wählen Sie, auf welcher Seite Weiß spielt:")
-                                user_white_side = st.selectbox("Weiß spielt auf:", ("Links", "Rechts"))
-                                white_side = user_white_side
-                            game_started = True
-                            starting_position = current_fen
+                        rotated_midpoints = transformed_midpoints.copy()
+
+                    # Generiere FEN erneut
+                    current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
+                    st.write(f"**Aktuelle FEN-Notation ({white_side}):** {current_fen}")
+                    game_started = True
+                    starting_position = current_fen
 
                 # Speichere das aktuelle Frame (optional)
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
