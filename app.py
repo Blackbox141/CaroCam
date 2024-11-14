@@ -253,9 +253,11 @@ def plot_clock_detections(image, result):
     plt.axis('off')
     return fig  # Rückgabe des Figure-Objekts
 
+# Angepasste Funktion plot_transformed_pieces
 def plot_transformed_pieces(image, midpoints, labels):
     fig, ax = plt.subplots(1, figsize=(8, 8))
     ax.imshow(image)
+    ax.invert_yaxis()  # Y-Achse invertieren
 
     for point, label in zip(midpoints, labels):
         ax.plot(point[0], point[1], 'ro')  # Roter Punkt für die Figur
@@ -266,12 +268,14 @@ def plot_transformed_pieces(image, midpoints, labels):
     plt.axis('off')
     return fig  # Rückgabe des Figure-Objekts
 
+# Angepasste Funktion plot_final_board
 def plot_final_board(image, midpoints, labels):
     grid_size = 8
     step_size = image.shape[0] // grid_size  # Größe jeder Zelle
 
     fig, ax = plt.subplots(1, figsize=(8, 8))
     ax.imshow(image)
+    ax.invert_yaxis()  # Y-Achse invertieren
 
     # Zeichne das Raster
     for i in range(grid_size + 1):
@@ -280,8 +284,8 @@ def plot_final_board(image, midpoints, labels):
 
     # Füge Koordinaten (A-H und 1-8) hinzu
     for i in range(grid_size):
-        ax.text(i * step_size + step_size / 2, image.shape[0] + 10, chr(65 + i),
-                fontsize=12, color='black', ha='center', va='center')
+        ax.text(i * step_size + step_size / 2, -10, chr(65 + i),
+                fontsize=12, color='black', ha='center', va='top')
         ax.text(-10, i * step_size + step_size / 2, str(grid_size - i),
                 fontsize=12, color='black', ha='right', va='center')
 
@@ -291,10 +295,13 @@ def plot_final_board(image, midpoints, labels):
         col = int(x // step_size)
         row = int(y // step_size)
 
+        # Invertiere den Zeilenindex
+        row = grid_size - 1 - row
+
         # Prüfe, ob die Position innerhalb der Grenzen liegt
         if 0 <= row < grid_size and 0 <= col < grid_size:
             square_x = col * step_size + step_size / 2
-            square_y = row * step_size + step_size / 2
+            square_y = (grid_size - 1 - row) * step_size + step_size / 2
 
             ax.text(square_x, square_y, FEN_MAPPING[label], fontsize=20, color='red', ha='center', va='center')
         else:
