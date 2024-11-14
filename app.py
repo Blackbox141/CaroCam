@@ -143,6 +143,85 @@ def adjust_point_D(A, B, C, D_calculated, percent_AB, percent_BC):
 
     return D_corrected
 
+def sort_points(A, B, C, D):
+    points = np.array([A, B, C, D])
+    # Sortiere die Punkte nach der y-Koordinate (oben und unten)
+    points = sorted(points, key=lambda x: x[1])
+    # Sortiere die oberen Punkte nach der x-Koordinate
+    top_points = sorted(points[:2], key=lambda x: x[0])  # Obere Punkte (A und D)
+    # Sortiere die unteren Punkte nach der x-Koordinate
+    bottom_points = sorted(points[2:], key=lambda x: x[0])  # Untere Punkte (B und C)
+    # Weisen den sortierten Punkten die richtige Position zu
+    A_sorted, D_sorted = top_points  # A ist oben links, D ist oben rechts
+    B_sorted, C_sorted = bottom_points  # B ist unten links, C ist unten rechts
+    return np.array([A_sorted, B_sorted, C_sorted, D_sorted], dtype=np.float32)
+
+def warp_perspective(image, src_points):
+    dst_size = 800  # Zielgröße 800x800 Pixel für das quadratische Schachbrett
+    dst_points = np.array([
+        [0, 0],  # A' (oben links)
+        [0, dst_size - 1],  # B' (unten links)
+        [dst_size - 1, dst_size - 1],  # C' (unten rechts)
+        [dst_size - 1, 0]  # D' (oben rechts)
+    ], dtype=np.float32)
+
+    # Perspektivtransformation berechnen
+    M = cv2.getPerspectiveTransform(src_points, dst_points)
+
+    # Perspektivtransformation anwenden
+    warped_image = cv2.warpPerspective(image, M, (dst_size, dst_size))
+
+    return warped_image, M
+
+def plot_pieces(image, result):
+    fig, ax = plt.subplots(1, figsize=(12, 12))
+    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+
+    for box in result.boxes:
+        x1, y1, x2, y2 = box.xyxy.cpu().numpy()[0]
+        cls = int(box.cls.cpu().numpy()[0])
+        label = result.names[cls]
+        conf = box.conf.cpu().numpy()[0]
+
+        rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor='green', facecolor='none')
+        ax.add_patch(rect)
+        ax.text(x1, y1 - 10, f'{label} {conf:.2f}', color='white', fontsize=12,
+                bbox=dict(facecolor='green', alpha=0.5))
+
+    plt.title("Erkannte Schachfiguren mit Bounding Boxes")
+    plt.axis('off')
+    return fig  # Rückgabe des Figure-Objekts
+
+def plot_corners(image, points):
+    fig, ax = plt.subplots(1, figsize=(8, 8))
+    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    for label, point in points.items():
+        ax.plot(point[0], point[1], 'ro')  # Rote Punkte für Eckpunkte
+        ax.text(point[0], point[1], label, fontsize=12, color='white',
+                bbox=dict(facecolor='red', alpha=0.5))
+    plt.title("Erkannte Eckpunkte des Schachbretts")
+    plt.axis('off')
+    return fig  # Rückgabe des Figure-Objekts
+
+def plot_clock_detections(image, result):
+    fig, ax = plt.subplots(1, figsize=(12, 12))
+    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+
+    for box in result.boxes:
+        x1, y1, x2, y2 = box.xyxy.cpu().numpy()[0]
+        cls = int(box.cls.cpu().numpy()[0])
+        label = result.names[cls]
+        conf = box.conf.cpu().numpy()[0]
+
+        rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor='yellow', facecolor='none')
+        ax.add_patch(rect)
+        ax.text(x1, y1 - 10, f'{label} {conf:.2f}', color='white', fontsize=12,
+                bbox=dict(facecolor='yellow', alpha=0.5))
+
+    plt.title("Erkannte Schachuhr Labels")
+    plt.axis('off')
+    return fig  # Rückgabe des Figure-Objekts
+
 def plot_points_with_correction(image, A, B, C, D_calculated, D_corrected):
     fig, ax = plt.subplots(1, figsize=(8, 8))
     ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
@@ -174,88 +253,43 @@ def plot_points_with_correction(image, A, B, C, D_calculated, D_corrected):
     plt.axis('off')
     return fig  # Rückgabe des Figure-Objekts
 
-def sort_points(A, B, C, D):
-    points = np.array([A, B, C, D])
-    # Sortiere die Punkte nach der y-Koordinate (oben und unten)
-    points = sorted(points, key=lambda x: x[1])
-    # Sortiere die oberen Punkte nach der x-Koordinate
-    top_points = sorted(points[:2], key=lambda x: x[0])  # Obere Punkte (A und D)
-    # Sortiere die unteren Punkte nach der x-Koordinate
-    bottom_points = sorted(points[2:], key=lambda x: x[0])  # Untere Punkte (B und C)
-    # Weisen den sortierten Punkten die richtige Position zu
-    A_sorted, D_sorted = top_points  # A ist oben links, D ist oben rechts
-    B_sorted, C_sorted = bottom_points  # B ist unten links, C ist unten rechts
-    return np.array([A_sorted, B_sorted, C_sorted, D_sorted], dtype=np.float32)
+# Neue Funktion zum Rotieren von Bild und Punkten
+def rotate_image_and_points(image, points, angle):
+    """
+    Rotiert ein Bild und passt die Koordinaten der Punkte entsprechend an.
+    """
+    (h, w) = image.shape[:2]
+    # Rotationsmatrix erhalten
+    center = (w / 2, h / 2)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
 
-def warp_perspective(image, src_points):
-    dst_size = 800  # Zielgröße 800x800 Pixel für das quadratische Schachbrett
-    dst_points = np.array([
-        [0, 0],  # A' (oben links)
-        [0, dst_size - 1],  # B' (unten links)
-        [dst_size - 1, dst_size - 1],  # C' (unten rechts)
-        [dst_size - 1, 0]  # D' (oben rechts)
-    ], dtype=np.float32)
+    # Neue Bounding-Dimensionen des Bildes berechnen
+    cos = np.abs(M[0, 0])
+    sin = np.abs(M[0, 1])
+    new_w = int((h * sin) + (w * cos))
+    new_h = int((h * cos) + (w * sin))
 
-    # Perspektivtransformation berechnen
-    M = cv2.getPerspectiveTransform(src_points, dst_points)
+    # Rotationsmatrix anpassen, um die Translation zu berücksichtigen
+    M[0, 2] += (new_w / 2) - center[0]
+    M[1, 2] += (new_h / 2) - center[1]
 
-    # Perspektivtransformation anwenden
-    warped_image = cv2.warpPerspective(image, M, (dst_size, dst_size))
+    # Tatsächliche Rotation durchführen und das Bild zurückgeben
+    rotated_image = cv2.warpAffine(image, M, (new_w, new_h))
 
-    return warped_image, M
+    # Punkte anpassen
+    ones = np.ones(shape=(len(points), 1))
+    points_ones = np.hstack([points, ones])
+    rotated_points = M @ points_ones.T
+    rotated_points = rotated_points.T
 
-def plot_corners(image, points):
-    fig, ax = plt.subplots(1, figsize=(8, 8))
-    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-    for label, point in points.items():
-        ax.plot(point[0], point[1], 'ro')  # Rote Punkte für Eckpunkte
-        ax.text(point[0], point[1], label, fontsize=12, color='white',
-                bbox=dict(facecolor='red', alpha=0.5))
-    plt.title("Erkannte Eckpunkte des Schachbretts")
-    plt.axis('off')
-    return fig  # Rückgabe des Figure-Objekts
+    return rotated_image, rotated_points
 
-def plot_pieces(image, result):
-    fig, ax = plt.subplots(1, figsize=(12, 12))
-    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-
-    for box in result.boxes:
-        x1, y1, x2, y2 = box.xyxy.cpu().numpy()[0]
-        cls = int(box.cls.cpu().numpy()[0])
-        label = result.names[cls]
-        conf = box.conf.cpu().numpy()[0]
-
-        rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor='green', facecolor='none')
-        ax.add_patch(rect)
-        ax.text(x1, y1 - 10, f'{label} {conf:.2f}', color='white', fontsize=12,
-                bbox=dict(facecolor='green', alpha=0.5))
-
-    plt.title("Erkannte Schachfiguren mit Bounding Boxes")
-    plt.axis('off')
-    return fig  # Rückgabe des Figure-Objekts
-
-def plot_clock_detections(image, result):
-    fig, ax = plt.subplots(1, figsize=(12, 12))
-    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-
-    for box in result.boxes:
-        x1, y1, x2, y2 = box.xyxy.cpu().numpy()[0]
-        cls = int(box.cls.cpu().numpy()[0])
-        label = result.names[cls]
-        conf = box.conf.cpu().numpy()[0]
-
-        rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor='yellow', facecolor='none')
-        ax.add_patch(rect)
-        ax.text(x1, y1 - 10, f'{label} {conf:.2f}', color='white', fontsize=12,
-                bbox=dict(facecolor='yellow', alpha=0.5))
-
-    plt.title("Erkannte Schachuhr Labels")
-    plt.axis('off')
-    return fig  # Rückgabe des Figure-Objekts
-
+# Angepasste Plot-Funktion für transformierte Figuren
 def plot_transformed_pieces(image, midpoints, labels):
     fig, ax = plt.subplots(1, figsize=(8, 8))
     ax.imshow(image)
+    ax.set_xlim(0, image.shape[1])
+    ax.set_ylim(image.shape[0], 0)  # Y-Achse invertieren
 
     for point, label in zip(midpoints, labels):
         ax.plot(point[0], point[1], 'ro')  # Roter Punkt für die Figur
@@ -266,35 +300,32 @@ def plot_transformed_pieces(image, midpoints, labels):
     plt.axis('off')
     return fig  # Rückgabe des Figure-Objekts
 
+# Angepasste Plot-Funktion für das finale Schachbrett
 def plot_final_board(image, midpoints, labels):
     grid_size = 8
-    step_size = image.shape[0] // grid_size  # Größe jeder Zelle
+    step_size_x = image.shape[1] / grid_size  # Größe jeder Zelle in x-Richtung
+    step_size_y = image.shape[0] / grid_size  # Größe jeder Zelle in y-Richtung
 
     fig, ax = plt.subplots(1, figsize=(8, 8))
     ax.imshow(image)
+    ax.set_xlim(0, image.shape[1])
+    ax.set_ylim(image.shape[0], 0)  # Y-Achse invertieren
 
     # Zeichne das Raster
     for i in range(grid_size + 1):
-        ax.axhline(i * step_size, color='black', linewidth=1)
-        ax.axvline(i * step_size, color='black', linewidth=1)
-
-    # Füge Koordinaten (A-H und 1-8) hinzu
-    for i in range(grid_size):
-        ax.text(i * step_size + step_size / 2, image.shape[0] + 10, chr(65 + i),
-                fontsize=12, color='black', ha='center', va='center')
-        ax.text(-10, i * step_size + step_size / 2, str(grid_size - i),
-                fontsize=12, color='black', ha='right', va='center')
+        ax.axhline(i * step_size_y, color='black', linewidth=1)
+        ax.axvline(i * step_size_x, color='black', linewidth=1)
 
     # Zeichne die Figuren in ihren entsprechenden Feldern
     for point, label in zip(midpoints, labels):
         x, y = point
-        col = int(x // step_size)
-        row = int(y // step_size)
+        col = int(x // step_size_x)
+        row = int(y // step_size_y)
 
         # Prüfe, ob die Position innerhalb der Grenzen liegt
         if 0 <= row < grid_size and 0 <= col < grid_size:
-            square_x = col * step_size + step_size / 2
-            square_y = row * step_size + step_size / 2
+            square_x = col * step_size_x + step_size_x / 2
+            square_y = row * step_size_y + step_size_y / 2
 
             ax.text(square_x, square_y, FEN_MAPPING[label], fontsize=20, color='red', ha='center', va='center')
         else:
@@ -309,13 +340,14 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
     # Erstelle ein leeres Schachbrett (8x8) als Liste von Listen
     board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
 
-    step_size = 800 // grid_size  # Größe jeder Zelle (entspricht der Größe des entzerrten Bildes)
+    step_size_x = 800 / grid_size  # Größe jeder Zelle in x-Richtung
+    step_size_y = 800 / grid_size  # Größe jeder Zelle in y-Richtung
 
     # Fülle das Board mit den Figuren basierend auf den erkannten Mittelpunkten
     for point, label in zip(midpoints, labels):
         x, y = point
-        col = int(x // step_size)
-        row = int(y // step_size)
+        col = int(x // step_size_x)
+        row = int(y // step_size_y)
 
         # Prüfe, ob die Position innerhalb der Grenzen liegt
         if 0 <= row < grid_size and 0 <= col < grid_size:
@@ -442,34 +474,6 @@ def plot_board_with_move(fen, best_move, white_side):
     # Anzeige des SVG-Bildes in Streamlit
     st.components.v1.html(board_svg, height=500)
 
-def rotate_image_and_points(image, points, angle):
-    # Rotiert das Bild und die Punkte um den angegebenen Winkel
-    (h, w) = image.shape[:2]
-    center = (w / 2, h / 2)
-
-    # Berechne die Rotationsmatrix
-    M = cv2.getRotationMatrix2D(center, angle, 1.0)
-
-    # Rotierte Bildgröße berechnen, um sicherzustellen, dass das gesamte Bild sichtbar ist
-    cos = np.abs(M[0, 0])
-    sin = np.abs(M[0, 1])
-    nW = int((h * sin) + (w * cos))
-    nH = int((h * cos) + (w * sin))
-
-    # Anpassung der Rotationsmatrix, um die Verschiebung zu berücksichtigen
-    M[0, 2] += (nW / 2) - center[0]
-    M[1, 2] += (nH / 2) - center[1]
-
-    # Rotiertes Bild erstellen
-    rotated_image = cv2.warpAffine(image, M, (nW, nH))
-
-    # Punkte rotieren
-    ones = np.ones(shape=(len(points), 1))
-    points_ones = np.hstack([points, ones])
-    rotated_points = M.dot(points_ones.T).T
-
-    return rotated_image, rotated_points
-
 def main():
     st.title("Schachbrett- und Figuren-Erkennung")
 
@@ -525,16 +529,14 @@ def main():
 
         # Rotationslogik basierend auf der Spielerposition
         if white_side == "Rechts":
-            # Weiß spielt rechts, Brett um 90 Grad drehen
-            angle = -90  # Negative Winkel für Drehung im Uhrzeigersinn
+            # Weiß spielt rechts, Bild um -90 Grad drehen
+            rotated_warped_image, rotated_midpoints = rotate_image_and_points(warped_image, transformed_midpoints, -90)
         elif white_side == "Links":
-            # Weiß spielt links, Brett um 90 Grad gegen den Uhrzeigersinn drehen
-            angle = 90  # Positive Winkel für Drehung gegen den Uhrzeigersinn
+            # Weiß spielt links, Bild um 90 Grad drehen
+            rotated_warped_image, rotated_midpoints = rotate_image_and_points(warped_image, transformed_midpoints, 90)
         else:
-            angle = 0
-
-        # Bild und Punkte rotieren
-        rotated_warped_image, rotated_midpoints = rotate_image_and_points(warped_image, transformed_midpoints, angle)
+            rotated_warped_image = warped_image
+            rotated_midpoints = transformed_midpoints
 
         # Schritt 4b: Erkennung des Spielers am Zug
         player_turn, clock_result = detect_player_turn(image)
