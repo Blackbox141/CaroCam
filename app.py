@@ -357,8 +357,8 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
             # Ignoriere Figuren außerhalb des Schachbretts
             st.write(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist außerhalb des Schachbretts und wird ignoriert.")
 
-    # Reihenfolge der Reihen umkehren, um die FEN-Notation korrekt zu erstellen
-    board = board[::-1]
+    # Reihenfolge der Reihen NICHT umkehren, da die Drehung bereits berücksichtigt wurde
+    # board = board[::-1]
 
     # Erstelle die FEN-Notation
     fen_rows = []
@@ -458,9 +458,9 @@ def plot_board_with_move(fen, best_move, white_side):
 
     # Setze das Brett auf die entsprechende Perspektive
     if white_side == "Links":
-        flipped = True  # Brett aus der Sicht von Schwarz
-    else:
         flipped = False  # Brett aus der Sicht von Weiß
+    else:
+        flipped = True  # Brett aus der Sicht von Schwarz
 
     # Erzeuge ein SVG-Bild des Schachbretts mit dem Pfeil
     board_svg = chess.svg.board(
@@ -529,11 +529,11 @@ def main():
 
         # Rotationslogik basierend auf der Spielerposition
         if white_side == "Rechts":
-            # Weiß spielt rechts, Bild um -90 Grad drehen
-            rotated_warped_image, rotated_midpoints = rotate_image_and_points(warped_image, transformed_midpoints, -90)
-        elif white_side == "Links":
-            # Weiß spielt links, Bild um 90 Grad drehen
+            # Weiß spielt rechts, Bild um 90 Grad drehen
             rotated_warped_image, rotated_midpoints = rotate_image_and_points(warped_image, transformed_midpoints, 90)
+        elif white_side == "Links":
+            # Weiß spielt links, Bild um -90 Grad drehen
+            rotated_warped_image, rotated_midpoints = rotate_image_and_points(warped_image, transformed_midpoints, -90)
         else:
             rotated_warped_image = warped_image
             rotated_midpoints = transformed_midpoints
