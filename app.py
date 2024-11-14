@@ -1,13 +1,11 @@
 import streamlit as st
 import numpy as np
 import cv2
-from matplotlib import pyplot as plt
-import matplotlib.patches as patches
 from ultralytics import YOLO
 import os
 import requests
 import chess
-import chess.svg
+import tempfile
 from PIL import Image
 
 # Holen des aktuellen Skriptverzeichnisses
@@ -141,37 +139,6 @@ def adjust_point_D(A, B, C, D_calculated, percent_AB, percent_BC):
 
     return D_corrected
 
-def plot_points_with_correction(image, A, B, C, D_calculated, D_corrected):
-    fig, ax = plt.subplots(1, figsize=(8, 8))
-    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-    colors = {'A': 'red', 'B': 'green', 'C': 'blue', 'D_calculated': 'yellow', 'D_corrected': 'magenta'}
-
-    # Zeichne die Punkte A, B, C
-    points = {'A': A, 'B': B, 'C': C}
-    for label, point in points.items():
-        ax.plot(point[0], point[1], 'o', color=colors[label])
-        ax.text(point[0], point[1], label, fontsize=12, color='white',
-                bbox=dict(facecolor=colors[label], alpha=0.5))
-
-    # Zeichne D_calculated
-    ax.plot(D_calculated[0], D_calculated[1], 'o', color=colors['D_calculated'])
-    ax.text(D_calculated[0], D_calculated[1], 'D_calculated', fontsize=12, color='white',
-            bbox=dict(facecolor=colors['D_calculated'], alpha=0.5))
-
-    # Zeichne D_corrected
-    ax.plot(D_corrected[0], D_corrected[1], 'o', color=colors['D_corrected'])
-    ax.text(D_corrected[0], D_corrected[1], 'D_corrected', fontsize=12, color='white',
-            bbox=dict(facecolor=colors['D_corrected'], alpha=0.5))
-
-    # Zeichne den Korrekturvektor als Pfeil von D_calculated zu D_corrected
-    ax.arrow(D_calculated[0], D_calculated[1],
-             D_corrected[0] - D_calculated[0], D_corrected[1] - D_calculated[1],
-             head_width=10, head_length=15, fc='magenta', ec='magenta', linestyle='--')
-
-    plt.title("Eckpunkte mit Korrektur des Punktes D")
-    plt.axis('off')
-    return fig  # Rückgabe des Figure-Objekts
-
 def sort_points(A, B, C, D):
     points = np.array([A, B, C, D])
     # Sortiere die Punkte nach der y-Koordinate (oben und unten)
@@ -202,106 +169,6 @@ def warp_perspective(image, src_points):
 
     return warped_image, M
 
-def plot_corners(image, points):
-    fig, ax = plt.subplots(1, figsize=(8, 8))
-    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-    for label, point in points.items():
-        ax.plot(point[0], point[1], 'ro')  # Rote Punkte für Eckpunkte
-        ax.text(point[0], point[1], label, fontsize=12, color='white',
-                bbox=dict(facecolor='red', alpha=0.5))
-    plt.title("Erkannte Eckpunkte des Schachbretts")
-    plt.axis('off')
-    return fig  # Rückgabe des Figure-Objekts
-
-def plot_pieces(image, result):
-    fig, ax = plt.subplots(1, figsize=(12, 12))
-    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-
-    for box in result.boxes:
-        x1, y1, x2, y2 = box.xyxy.cpu().numpy()[0]
-        cls = int(box.cls.cpu().numpy()[0])
-        label = result.names[cls]
-        conf = box.conf.cpu().numpy()[0]
-
-        rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor='green', facecolor='none')
-        ax.add_patch(rect)
-        ax.text(x1, y1 - 10, f'{label} {conf:.2f}', color='white', fontsize=12,
-                bbox=dict(facecolor='green', alpha=0.5))
-
-    plt.title("Erkannte Schachfiguren mit Bounding Boxes")
-    plt.axis('off')
-    return fig  # Rückgabe des Figure-Objekts
-
-def plot_clock_detections(image, result):
-    fig, ax = plt.subplots(1, figsize=(12, 12))
-    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-
-    for box in result.boxes:
-        x1, y1, x2, y2 = box.xyxy.cpu().numpy()[0]
-        cls = int(box.cls.cpu().numpy()[0])
-        label = result.names[cls]
-        conf = box.conf.cpu().numpy()[0]
-
-        rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor='yellow', facecolor='none')
-        ax.add_patch(rect)
-        ax.text(x1, y1 - 10, f'{label} {conf:.2f}', color='white', fontsize=12,
-                bbox=dict(facecolor='yellow', alpha=0.5))
-
-    plt.title("Erkannte Schachuhr Labels")
-    plt.axis('off')
-    return fig  # Rückgabe des Figure-Objekts
-
-def plot_transformed_pieces(image, midpoints, labels):
-    fig, ax = plt.subplots(1, figsize=(8, 8))
-    ax.imshow(image)
-
-    for point, label in zip(midpoints, labels):
-        ax.plot(point[0], point[1], 'ro')  # Roter Punkt für die Figur
-        ax.text(point[0], point[1], label, fontsize=12, color='white',
-                bbox=dict(facecolor='blue', alpha=0.5))
-
-    plt.title("Transformierte Schachfiguren auf dem entzerrten Schachbrett")
-    plt.axis('off')
-    return fig  # Rückgabe des Figure-Objekts
-
-def plot_final_board(image, midpoints, labels):
-    grid_size = 8
-    step_size = image.shape[0] // grid_size  # Größe jeder Zelle
-
-    fig, ax = plt.subplots(1, figsize=(8, 8))
-    ax.imshow(image)
-
-    # Zeichne das Raster
-    for i in range(grid_size + 1):
-        ax.axhline(i * step_size, color='black', linewidth=1)
-        ax.axvline(i * step_size, color='black', linewidth=1)
-
-    # Füge Koordinaten (A-H und 1-8) hinzu
-    for i in range(grid_size):
-        ax.text(i * step_size + step_size / 2, image.shape[0] + 10, chr(65 + i),
-                fontsize=12, color='black', ha='center', va='center')
-        ax.text(-10, i * step_size + step_size / 2, str(grid_size - i),
-                fontsize=12, color='black', ha='right', va='center')
-
-    # Zeichne die Figuren in ihren entsprechenden Feldern
-    for point, label in zip(midpoints, labels):
-        x, y = point
-        col = int(x // step_size)
-        row = int(y // step_size)
-
-        # Prüfe, ob die Position innerhalb der Grenzen liegt
-        if 0 <= row < grid_size and 0 <= col < grid_size:
-            square_x = col * step_size + step_size / 2
-            square_y = row * step_size + step_size / 2
-
-            ax.text(square_x, square_y, FEN_MAPPING[label], fontsize=20, color='red', ha='center', va='center')
-        else:
-            pass  # Ignoriere Figuren außerhalb des Schachbretts
-
-    plt.title("Schachbrett mit Figurenpositionen")
-    plt.axis('off')
-    return fig  # Rückgabe des Figure-Objekts
-
 def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
     # Erstelle ein leeres Schachbrett (8x8) als Liste von Listen
     board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
@@ -319,7 +186,8 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
             fen_char = FEN_MAPPING.get(label, '')
             board[row][col] = fen_char
         else:
-            pass  # Ignoriere Figuren außerhalb des Schachbretts
+            # Ignoriere Figuren außerhalb des Schachbretts
+            pass
 
     # Reihenfolge der Reihen umkehren, um die FEN-Notation korrekt zu erstellen
     board = board[::-1]
@@ -411,13 +279,10 @@ def plot_board_with_move(fen, best_move, white_side):
     if best_move:
         try:
             move = chess.Move.from_uci(best_move)
-            st.write(f"Empfohlener Zug: '{best_move}' wird als Pfeil dargestellt.")
             arrows = [chess.svg.Arrow(move.from_square, move.to_square, color='#FF0000')]
         except ValueError:
-            st.write(f"Der empfohlene Zug '{best_move}' ist ungültig.")
             arrows = []
     else:
-        st.write("Kein Zug wurde empfohlen oder der Zug ist ungültig.")
         arrows = []
 
     # Setze das Brett auf die entsprechende Perspektive
@@ -441,6 +306,9 @@ def plot_board_with_move(fen, best_move, white_side):
 def main():
     st.title("Schachbrett- und Figuren-Erkennung")
 
+    # Option zum Anzeigen der Zwischenschritte
+    show_steps = st.button("Zwischenschritte anzeigen")
+
     # Bild hochladen
     uploaded_file = st.file_uploader("Lade ein Bild des Schachbretts hoch", type=["jpg", "jpeg", "png"])
 
@@ -460,17 +328,23 @@ def main():
         st.subheader("Spielerpositionen")
         white_side = st.selectbox("Auf welcher Seite spielt Weiß?", ("Links", "Rechts"))
 
-        # Schritt 1: Erkennung der Schachfiguren und Visualisierung
+        # Schritt 1: Erkennung der Schachfiguren
         piece_midpoints, piece_labels, piece_results = detect_pieces(image)
-        st.subheader("Erkannte Schachfiguren mit Bounding Boxes")
-        fig1 = plot_pieces(image, piece_results)
-        st.pyplot(fig1)
 
-        # Schritt 2: Erkennung der Eckpunkte und Visualisierung
+        if show_steps:
+            st.subheader("Schritt 1: Erkennung der Schachfiguren")
+            # Anzeige der erkannten Schachfiguren
+            annotated_image = piece_results[0].plot()
+            st.image(annotated_image, caption='Erkannte Schachfiguren', use_column_width=True)
+
+        # Schritt 2: Erkennung der Eckpunkte
         detected_points, corner_results = detect_corners(image)
-        st.subheader("Erkannte Eckpunkte des Schachbretts")
-        fig2 = plot_corners(image, detected_points)
-        st.pyplot(fig2)
+
+        if show_steps:
+            st.subheader("Schritt 2: Erkennung der Eckpunkte")
+            # Anzeige der erkannten Eckpunkte
+            annotated_image = corner_results[0].plot()
+            st.image(annotated_image, caption='Erkannte Eckpunkte', use_column_width=True)
 
         # Schritt 3: Berechnung der Ecke D und Perspektivtransformation
         A = detected_points["A"]
@@ -481,24 +355,26 @@ def main():
         # Anpassung des Punktes D mit dem festen Korrekturvektor
         D_corrected = adjust_point_D(A, B, C, D_calculated, PERCENT_AB, PERCENT_BC)
 
-        # Visualisierung von D_calculated und D_corrected
-        st.subheader("Visualisierung von D_calculated und D_corrected mit Korrekturvektor")
-        fig_correction = plot_points_with_correction(image, A, B, C, D_calculated, D_corrected)
-        st.pyplot(fig_correction)
-
         # Sortiere die Punkte
         sorted_points = sort_points(A, B, C, D_corrected.astype(int))
 
+        if show_steps:
+            st.subheader("Schritt 3: Perspektivtransformation")
+            # Zeichnen der Punkte auf dem Bild
+            image_with_points = image_rgb.copy()
+            for idx, point in enumerate(sorted_points):
+                cv2.circle(image_with_points, (int(point[0]), int(point[1])), 10, (255, 0, 0), -1)
+                cv2.putText(image_with_points, f'P{idx+1}', (int(point[0])+10, int(point[1])+10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+            st.image(image_with_points, caption='Eckpunkte für die Perspektivtransformation', use_column_width=True)
+
         # Perspektivtransformation durchführen
         warped_image, M = warp_perspective(image_rgb, sorted_points)
-        st.subheader("Entzerrtes Schachbrett")
-        fig3 = plt.figure(figsize=(8, 8))
-        plt.imshow(warped_image)
-        plt.title("Entzerrtes Schachbrett")
-        plt.axis('off')
-        st.pyplot(fig3)
 
-        # Schritt 4: Schachfiguren transformieren und visualisieren
+        if show_steps:
+            st.subheader("Entzerrtes Schachbrett")
+            st.image(warped_image, caption='Entzerrtes Schachbrett', use_column_width=True)
+
+        # Schritt 4: Schachfiguren transformieren
         ones = np.ones((piece_midpoints.shape[0], 1))
         piece_midpoints_homogeneous = np.hstack([piece_midpoints, ones])
         transformed_midpoints = M @ piece_midpoints_homogeneous.T
@@ -524,26 +400,33 @@ def main():
             rotated_warped_image = warped_image
             rotated_midpoints = transformed_midpoints
 
-        st.subheader("Transformierte Schachfiguren auf dem entzerrten Schachbrett")
-        fig4 = plot_transformed_pieces(rotated_warped_image, rotated_midpoints, piece_labels)
-        st.pyplot(fig4)
+        if show_steps:
+            st.subheader("Schritt 4: Ausrichtung des Schachbretts")
+            st.image(rotated_warped_image, caption='Ausrichtung entsprechend der Spielerposition', use_column_width=True)
+
+            # Zeichnen der Figuren auf dem ausgerichteten Schachbrett
+            image_with_pieces = rotated_warped_image.copy()
+            for point, label in zip(rotated_midpoints, piece_labels):
+                cv2.circle(image_with_pieces, (int(point[0]), int(point[1])), 10, (0, 255, 0), -1)
+                cv2.putText(image_with_pieces, label, (int(point[0])+10, int(point[1])+10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            st.image(image_with_pieces, caption='Erkannte Figuren auf dem ausgerichteten Schachbrett', use_column_width=True)
 
         # Schritt 4b: Erkennung des Spielers am Zug
         player_turn, clock_result = detect_player_turn(image)
-        st.subheader("Erkannte Schachuhr Labels")
-        fig_clock = plot_clock_detections(image, clock_result)
-        st.pyplot(fig_clock)
+
+        if show_steps:
+            st.subheader("Schritt 5: Erkennung des Spielers am Zug")
+            annotated_image = clock_result[0].plot()
+            st.image(annotated_image, caption='Erkannte Schachuhr', use_column_width=True)
 
         # Mappe 'left' und 'right' zu Spielern basierend auf der Position von Weiß
         if player_turn is None:
-            st.write("Konnte nicht erkennen, wer am Zug ist oder die Uhr steht auf 'hold'.")
             player_input = st.selectbox("Bitte wählen Sie, wer am Zug ist:", ("Weiß", "Schwarz"))
             if player_input == "Weiß":
                 player_turn = 'white'
             else:
                 player_turn = 'black'
         else:
-            st.write(f"Erkannter Uhrenseite am Zug: {player_turn}")
             if white_side == "Links":
                 if player_turn == 'left':
                     player_turn = 'white'
@@ -554,7 +437,6 @@ def main():
                     player_turn = 'white'
                 else:
                     player_turn = 'black'
-            st.write(f"Basierend auf der Spielerposition ist {player_turn.capitalize()} am Zug.")
 
         # Mappe 'white' und 'black' zu 'w' und 'b' für die FEN-Notation
         if player_turn == 'white':
@@ -572,11 +454,6 @@ def main():
         # Schritt 7: Darstellung der FEN-Notation mit dem empfohlenen Zug
         st.subheader("Empfohlenes Schachbrett mit Zugempfehlung")
         plot_board_with_move(fen_string, best_move, white_side)
-
-        # Anzeige des Schachbretts mit Figurenpositionen
-        st.subheader("Schachbrett mit Figurenpositionen")
-        fig5 = plot_final_board(rotated_warped_image, rotated_midpoints, piece_labels)
-        st.pyplot(fig5)
 
     else:
         st.write("Bitte lade ein Bild des Schachbretts hoch.")
