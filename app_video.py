@@ -57,6 +57,7 @@ STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
 
 def detect_pieces(image):
     results = piece_model.predict(image, conf=0.1, iou=0.3, imgsz=1400)
+    class_names = piece_model.model.names  # Zugriff auf die Klassennamen
     result = results[0]
 
     midpoints = []
@@ -64,9 +65,9 @@ def detect_pieces(image):
     boxes = result.boxes
 
     for box in boxes:
-        x1, y1, x2, y2 = box.xyxy.cpu().numpy()[0]
-        cls = int(box.cls.cpu().numpy()[0])
-        label = result.names[cls]
+        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+        cls_id = int(box.cls.cpu().numpy()[0])
+        label = class_names[cls_id]
 
         # Berechnung des Mittelpunkts der unteren Hälfte der Bounding Box
         mid_x = x1 + (x2 - x1) / 2
@@ -83,23 +84,26 @@ def detect_pieces(image):
 
 def detect_corners(image):
     results = corner_model(image)
+    class_names = corner_model.model.names  # Zugriff auf die Klassennamen
     points = {}
 
-    for result in results[0].boxes:
-        box = result.xyxy[0].cpu().numpy()  # (x1, y1, x2, y2)
-        center_x = int((box[0] + box[2]) / 2)  # Mittelpunkt der Bounding Box (x)
-        center_y = int((box[1] + box[3]) / 2)  # Mittelpunkt der Bounding Box (y)
+    for box in results[0].boxes:
+        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()  # (x1, y1, x2, y2)
+        center_x = int((x1 + x2) / 2)  # Mittelpunkt der Bounding Box (x)
+        center_y = int((y1 + y2) / 2)  # Mittelpunkt der Bounding Box (y)
+
+        cls_id = int(box.cls.cpu().numpy()[0])
 
         # Klassennamen im YOLO-Modell zuordnen
-        if result.cls.item() == 0:  # A
+        if cls_id == 0:  # A
             points["A"] = np.array([center_x, center_y])
-        elif result.cls.item() == 1:  # B
+        elif cls_id == 1:  # B
             points["B"] = np.array([center_x, center_y])
-        elif result.cls.item() == 2:  # C
+        elif cls_id == 2:  # C
             points["C"] = np.array([center_x, center_y])
 
         # Zeichne die Eckpunkte auf das Bild
-        label = result.names[int(result.cls.item())]
+        label = class_names[cls_id]
         cv2.circle(image, (center_x, center_y), 5, (0, 0, 255), -1)
         cv2.putText(image, label, (center_x + 10, center_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
 
@@ -111,6 +115,7 @@ def detect_corners(image):
 
 def detect_player_turn(image):
     results = clock_model.predict(image, conf=0.1, iou=0.3, imgsz=1400)
+    class_names = clock_model.model.names  # Zugriff auf die Klassennamen
     result = results[0]
     boxes = result.boxes
 
@@ -118,9 +123,9 @@ def detect_player_turn(image):
     labels = []
 
     for box in boxes:
-        x1, y1, x2, y2 = box.xyxy.cpu().numpy()[0]
-        cls = int(box.cls.cpu().numpy()[0])
-        label = result.names[cls]
+        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+        cls_id = int(box.cls.cpu().numpy()[0])
+        label = class_names[cls_id]
         labels.append(label)
 
         # Zeichne die Bounding Box und das Label auf das Bild
