@@ -266,7 +266,7 @@ def plot_transformed_pieces(image, midpoints, labels):
     plt.axis('off')
     return fig  # Rückgabe des Figure-Objekts
 
-def plot_final_board(image, midpoints, labels, white_side='Links'):
+def plot_final_board(image, midpoints, labels):
     grid_size = 8
     step_size = image.shape[0] // grid_size  # Größe jeder Zelle
 
@@ -293,17 +293,6 @@ def plot_final_board(image, midpoints, labels, white_side='Links'):
 
         # Prüfe, ob die Position innerhalb der Grenzen liegt
         if 0 <= row < grid_size and 0 <= col < grid_size:
-            # Basierend auf der Seite, auf der Weiß spielt, passen wir die Indizes an
-            if white_side == 'Links':
-                # Keine Anpassung notwendig
-                pass
-            elif white_side == 'Rechts':
-                # Um die Positionen zu spiegeln
-                row = grid_size - 1 - row
-                col = grid_size - 1 - col
-            else:
-                pass  # Standardfall, keine Anpassung
-
             square_x = col * step_size + step_size / 2
             square_y = row * step_size + step_size / 2
 
@@ -316,7 +305,7 @@ def plot_final_board(image, midpoints, labels, white_side='Links'):
     plt.axis('off')
     return fig  # Rückgabe des Figure-Objekts
 
-def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w', white_side='Links'):
+def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
     # Erstelle ein leeres Schachbrett (8x8) als Liste von Listen
     board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
 
@@ -330,22 +319,14 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w', 
 
         # Prüfe, ob die Position innerhalb der Grenzen liegt
         if 0 <= row < grid_size and 0 <= col < grid_size:
-            # Basierend auf der Seite, auf der Weiß spielt, passen wir die Indizes an
-            if white_side == 'Links':
-                # Keine Anpassung notwendig
-                pass
-            elif white_side == 'Rechts':
-                # Um die Positionen zu spiegeln
-                row = grid_size - 1 - row
-                col = grid_size - 1 - col
-            else:
-                pass  # Standardfall, keine Anpassung
-
             fen_char = FEN_MAPPING.get(label, '')
             board[row][col] = fen_char
         else:
             # Ignoriere Figuren außerhalb des Schachbretts
             st.write(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist außerhalb des Schachbretts und wird ignoriert.")
+
+    # Reihenfolge der Reihen umkehren, um die FEN-Notation korrekt zu erstellen
+    board = board[::-1]
 
     # Erstelle die FEN-Notation
     fen_rows = []
@@ -461,6 +442,34 @@ def plot_board_with_move(fen, best_move, white_side):
     # Anzeige des SVG-Bildes in Streamlit
     st.components.v1.html(board_svg, height=500)
 
+def rotate_image_and_points(image, points, angle):
+    # Rotiert das Bild und die Punkte um den angegebenen Winkel
+    (h, w) = image.shape[:2]
+    center = (w / 2, h / 2)
+
+    # Berechne die Rotationsmatrix
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+
+    # Rotierte Bildgröße berechnen, um sicherzustellen, dass das gesamte Bild sichtbar ist
+    cos = np.abs(M[0, 0])
+    sin = np.abs(M[0, 1])
+    nW = int((h * sin) + (w * cos))
+    nH = int((h * cos) + (w * sin))
+
+    # Anpassung der Rotationsmatrix, um die Verschiebung zu berücksichtigen
+    M[0, 2] += (nW / 2) - center[0]
+    M[1, 2] += (nH / 2) - center[1]
+
+    # Rotiertes Bild erstellen
+    rotated_image = cv2.warpAffine(image, M, (nW, nH))
+
+    # Punkte rotieren
+    ones = np.ones(shape=(len(points), 1))
+    points_ones = np.hstack([points, ones])
+    rotated_points = M.dot(points_ones.T).T
+
+    return rotated_image, rotated_points
+
 def main():
     st.title("Schachbrett- und Figuren-Erkennung")
 
@@ -515,26 +524,17 @@ def main():
         transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
 
         # Rotationslogik basierend auf der Spielerposition
-        height, width = warped_image.shape[:2]
-
         if white_side == "Rechts":
             # Weiß spielt rechts, Brett um 90 Grad drehen
-            rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_90_CLOCKWISE)
-            rotated_height, rotated_width = rotated_warped_image.shape[:2]
-            rotated_midpoints = np.zeros_like(transformed_midpoints)
-            rotated_midpoints[:, 0] = transformed_midpoints[:, 1]  # x' = y
-            rotated_midpoints[:, 1] = width - transformed_midpoints[:, 0] - 1  # y' = width - x -1
+            angle = -90  # Negative Winkel für Drehung im Uhrzeigersinn
         elif white_side == "Links":
-            # Weiß spielt links, Brett um 270 Grad drehen (90 Grad gegen den Uhrzeigersinn)
-            rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-            rotated_height, rotated_width = rotated_warped_image.shape[:2]
-            rotated_midpoints = np.zeros_like(transformed_midpoints)
-            rotated_midpoints[:, 0] = height - transformed_midpoints[:, 1] - 1  # x' = height - y -1
-            rotated_midpoints[:, 1] = transformed_midpoints[:, 0]  # y' = x
+            # Weiß spielt links, Brett um 90 Grad gegen den Uhrzeigersinn drehen
+            angle = 90  # Positive Winkel für Drehung gegen den Uhrzeigersinn
         else:
-            rotated_warped_image = warped_image
-            rotated_height, rotated_width = rotated_warped_image.shape[:2]
-            rotated_midpoints = transformed_midpoints
+            angle = 0
+
+        # Bild und Punkte rotieren
+        rotated_warped_image, rotated_midpoints = rotate_image_and_points(warped_image, transformed_midpoints, angle)
 
         # Schritt 4b: Erkennung des Spielers am Zug
         player_turn, clock_result = detect_player_turn(image)
@@ -568,7 +568,7 @@ def main():
             player_to_move = 'b'
 
         # Schritt 5: Generiere die FEN-Notation
-        fen_string = generate_fen_from_board(rotated_midpoints, piece_labels, player_to_move=player_to_move, white_side=white_side)
+        fen_string = generate_fen_from_board(rotated_midpoints, piece_labels, player_to_move=player_to_move)
         st.write(f"**FEN-Notation:** {fen_string}")
 
         # Schritt 6: Analyse der FEN-Notation mit der Stockfish API
@@ -604,7 +604,7 @@ def main():
             st.pyplot(fig4)
 
             st.subheader("Schachbrett mit Figurenpositionen")
-            fig5 = plot_final_board(rotated_warped_image, rotated_midpoints, piece_labels, white_side=white_side)
+            fig5 = plot_final_board(rotated_warped_image, rotated_midpoints, piece_labels)
             st.pyplot(fig5)
 
             st.subheader("Erkannte Schachuhr Labels")
