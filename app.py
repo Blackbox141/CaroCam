@@ -7,7 +7,6 @@ import requests
 import chess
 import tempfile
 from PIL import Image
-from collections import Counter
 
 # Holen des aktuellen Skriptverzeichnisses
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -170,22 +169,6 @@ def warp_perspective(image, src_points):
 
     return warped_image, M
 
-def rotate_image_and_points(image, points, angle):
-    # Get image dimensions
-    (h, w) = image.shape[:2]
-    # Compute the center of the image
-    center = (w / 2, h / 2)
-    # Compute the rotation matrix
-    M = cv2.getRotationMatrix2D(center, angle, 1.0)
-    # Rotate the image
-    rotated_image = cv2.warpAffine(image, M, (w, h))
-    # Convert points to homogeneous coordinates
-    ones = np.ones(shape=(len(points), 1))
-    points_homogeneous = np.hstack([points, ones])
-    # Apply rotation matrix to the points
-    rotated_points = M.dot(points_homogeneous.T).T
-    return rotated_image, rotated_points
-
 def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
     # Erstelle ein leeres Schachbrett (8x8) als Liste von Listen
     board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
@@ -344,13 +327,9 @@ def main():
 
         # Schritt 1: Erkennung der Schachfiguren
         piece_midpoints, piece_labels, piece_results = detect_pieces(image)
-        # Sammle die annotierten Bilder und Zähle die Figuren
-        annotated_pieces_image = piece_results[0].plot()
-        piece_counts = Counter(piece_labels)
 
         # Schritt 2: Erkennung der Eckpunkte
         detected_points, corner_results = detect_corners(image)
-        annotated_corners_image = corner_results[0].plot()
 
         # Schritt 3: Berechnung der Ecke D und Perspektivtransformation
         A = detected_points["A"]
@@ -364,12 +343,6 @@ def main():
         # Sortiere die Punkte
         sorted_points = sort_points(A, B, C, D_corrected.astype(int))
 
-        # Zeichnen der Punkte auf dem Bild
-        image_with_points = image_rgb.copy()
-        for idx, point in enumerate(sorted_points):
-            cv2.circle(image_with_points, (int(point[0]), int(point[1])), 10, (255, 0, 0), -1)
-            cv2.putText(image_with_points, f'P{idx+1}', (int(point[0])+10, int(point[1])+10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
-
         # Perspektivtransformation durchführen
         warped_image, M = warp_perspective(image_rgb, sorted_points)
 
@@ -381,25 +354,26 @@ def main():
         transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
 
         # Rotationslogik basierend auf der Spielerposition
+        height, width = warped_image.shape[:2]
+
         if white_side == "Rechts":
             # Weiß spielt rechts, Brett um 90 Grad drehen
-            rotated_warped_image, rotated_midpoints = rotate_image_and_points(warped_image, transformed_midpoints, -90)
+            rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_90_CLOCKWISE)
+            rotated_midpoints = np.zeros_like(transformed_midpoints)
+            rotated_midpoints[:, 0] = transformed_midpoints[:, 1]
+            rotated_midpoints[:, 1] = width - transformed_midpoints[:, 0]
         elif white_side == "Links":
-            # Weiß spielt links, Brett um 90 Grad drehen
-            rotated_warped_image, rotated_midpoints = rotate_image_and_points(warped_image, transformed_midpoints, 90)
+            # Weiß spielt links, Brett um 270 Grad drehen (90 Grad gegen den Uhrzeigersinn)
+            rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            rotated_midpoints = np.zeros_like(transformed_midpoints)
+            rotated_midpoints[:, 0] = height - transformed_midpoints[:, 1]
+            rotated_midpoints[:, 1] = transformed_midpoints[:, 0]
         else:
             rotated_warped_image = warped_image
             rotated_midpoints = transformed_midpoints
 
-        # Zeichnen der Figuren auf dem ausgerichteten Schachbrett
-        image_with_pieces = rotated_warped_image.copy()
-        for point, label in zip(rotated_midpoints, piece_labels):
-            cv2.circle(image_with_pieces, (int(point[0]), int(point[1])), 10, (0, 255, 0), -1)
-            cv2.putText(image_with_pieces, label, (int(point[0])+10, int(point[1])+10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
         # Schritt 4b: Erkennung des Spielers am Zug
         player_turn, clock_result = detect_player_turn(image)
-        annotated_clock_image = clock_result[0].plot()
 
         # Mappe 'left' und 'right' zu Spielern basierend auf der Position von Weiß
         if player_turn is None:
@@ -436,40 +410,6 @@ def main():
         # Schritt 7: Darstellung der FEN-Notation mit dem empfohlenen Zug
         st.subheader("Empfohlenes Schachbrett mit Zugempfehlung")
         plot_board_with_move(fen_string, best_move, white_side)
-
-        # Option zum Anzeigen der Zwischenschritte
-        if st.button("Zwischenschritte anzeigen"):
-            st.subheader("Schritt 1: Erkennung der Schachfiguren")
-            st.image(annotated_pieces_image, caption='Erkannte Schachfiguren', use_column_width=True)
-            st.write("**Erkannte Figuren:**")
-            for label, count in piece_counts.items():
-                st.write(f"- {label}: {count}")
-
-            st.subheader("Schritt 2: Erkennung der Eckpunkte")
-            st.image(annotated_corners_image, caption='Erkannte Eckpunkte', use_column_width=True)
-
-            st.subheader("Schritt 3: Perspektivtransformation")
-            st.image(image_with_points, caption='Eckpunkte für die Perspektivtransformation', use_column_width=True)
-            st.image(warped_image, caption='Entzerrtes Schachbrett', use_column_width=True)
-
-            st.subheader("Schritt 4: Ausrichtung des Schachbretts")
-            st.image(rotated_warped_image, caption='Ausrichtung entsprechend der Spielerposition', use_column_width=True)
-
-            # Darstellung des virtuellen Gitters
-            st.subheader("Virtuelle Einteilung des Schachbretts")
-            grid_image = rotated_warped_image.copy()
-            grid_size = 8
-            step_size = rotated_warped_image.shape[0] // grid_size
-            for i in range(1, grid_size):
-                cv2.line(grid_image, (i*step_size, 0), (i*step_size, rotated_warped_image.shape[0]), (255, 0, 0), 1)
-                cv2.line(grid_image, (0, i*step_size), (rotated_warped_image.shape[1], i*step_size), (255, 0, 0), 1)
-            st.image(grid_image, caption='Schachbrett mit virtuellem Gitter', use_column_width=True)
-
-            st.subheader("Erkannte Figuren auf dem ausgerichteten Schachbrett")
-            st.image(image_with_pieces, caption='Erkannte Figuren auf dem ausgerichteten Schachbrett', use_column_width=True)
-
-            st.subheader("Schritt 5: Erkennung des Spielers am Zug")
-            st.image(annotated_clock_image, caption='Erkannte Schachuhr', use_column_width=True)
 
     else:
         st.write("Bitte lade ein Bild des Schachbretts hoch.")
