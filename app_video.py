@@ -199,7 +199,7 @@ def warp_perspective(image, src_points):
 
     return warped_image, M
 
-def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
+def generate_fen_from_board(midpoints, labels, grid_size=8):
     # Erstelle ein leeres Schachbrett (8x8)
     board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
 
@@ -238,18 +238,23 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
             fen_row += str(empty_count)
         fen_rows.append(fen_row)
 
-    # Verbinde alle Zeilen mit Schrägstrichen und füge die zusätzlichen Informationen hinzu
-    fen_string = '/'.join(fen_rows) + f" {player_to_move} - - 0 1"
+    # Verbinde alle Zeilen mit Schrägstrichen
+    fen_string = '/'.join(fen_rows)
 
     return fen_string
 
-def get_move_between_positions(previous_fen, current_fen):
-    previous_board = chess.Board(previous_fen)
-    current_board = chess.Board(current_fen)
+def get_move_between_positions(previous_fen_full, current_fen_full):
+    # Extrahiere die Brettstellung (erster Teil der FEN)
+    previous_fen = previous_fen_full.split(' ')[0]
+    current_fen = current_fen_full.split(' ')[0]
+
+    # Erstelle die Schachbretter
+    previous_board = chess.Board(fen=previous_fen + ' w - - 0 1')
+    current_board = chess.Board(fen=current_fen + ' w - - 0 1')
 
     move_made = None
 
-    # Generiere alle legalen Züge aus der vorherigen Position
+    # Generiere alle möglichen Züge aus der vorherigen Position
     for move in previous_board.legal_moves:
         # Erstelle eine Kopie des vorherigen Boards
         board_copy = previous_board.copy()
@@ -263,19 +268,24 @@ def get_move_between_positions(previous_fen, current_fen):
 
 def save_game_to_pgn(moves, starting_fen):
     game = chess.pgn.Game()
-    game.setup(chess.Board(starting_fen))
+    game.setup(chess.Board(starting_fen + ' w - - 0 1'))
 
     node = game
 
     for move_uci in moves:
-        move = chess.Move.from_uci(move_uci)
-        node = node.add_variation(move)
+        if move_uci != "Unbekannter Zug":
+            move = chess.Move.from_uci(move_uci)
+            node = node.add_variation(move)
+        else:
+            # Bei unbekanntem Zug fügen wir einen Kommentar hinzu
+            node = node.add_variation(chess.Move.null())
+            node.comment = "Unbekannter Zug"
 
     pgn_string = str(game)
     return pgn_string
 
 def main():
-    st.title("Schachspiel Analyse aus Video mit Fortschrittsanzeige l+r")
+    st.title("Schachspiel Analyse aus Video mit Fortschrittsanzeige 3")
 
     # Video hochladen
     uploaded_file = st.file_uploader("Lade ein Video des Schachspiels hoch", type=["mp4", "avi", "mov"])
@@ -312,8 +322,6 @@ def main():
         user_white_side = None  # Variable, um zu speichern, ob der Benutzer die Seite gewählt hat
         game_over = False
         frame_count = 0
-
-        current_player = 'w'  # Startspieler Weiß
 
         # Einmalige Schachbrett-Erkennung
         corners_detected = False
@@ -397,24 +405,10 @@ def main():
             previous_player_turn = player_turn
 
             # Wenn der Spielerzug stabil ist (mindestens 5 aufeinanderfolgende Frames gleich)
-            if stable_player_turn_count >= 5 and player_turn != 'hold' and player_turn is not None:
+            if stable_player_turn_count >= 5:
                 # Prüfe, ob sich der stabile Spielerzug geändert hat
                 if previous_player_turn_stable != player_turn:
                     st.write(f"Stabiler Uhrwechsel erkannt: {previous_player_turn_stable} -> {player_turn}")
-
-                    # Bestimme den Spieler am Zug basierend auf dem Uhrwechsel
-                    if previous_player_turn_stable == 'left' and player_turn == 'right':
-                        # Spieler auf der linken Seite hat einen Zug gemacht
-                        current_player = 'b'  # Jetzt ist Schwarz am Zug
-                    elif previous_player_turn_stable == 'right' and player_turn == 'left':
-                        # Spieler auf der rechten Seite hat einen Zug gemacht
-                        current_player = 'w'  # Jetzt ist Weiß am Zug
-                    # Initialisierung
-                    elif previous_player_turn_stable is None:
-                        if player_turn == 'left':
-                            current_player = 'w'
-                        elif player_turn == 'right':
-                            current_player = 'b'
 
                     # Speichere den neuen stabilen Spielerzug
                     previous_player_turn_stable = player_turn
@@ -457,11 +451,11 @@ def main():
                                 rotated_midpoints = transformed_midpoints.copy()
 
                             # Generiere FEN
-                            current_fen = generate_fen_from_board(rotated_midpoints, piece_labels, player_to_move=current_player)
+                            current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
                             st.write(f"**Aktuelle FEN-Notation ({side}):** {current_fen}")
 
                             # Prüfe, ob es die Grundstellung ist
-                            if current_fen.startswith(STARTING_FEN):
+                            if current_fen == STARTING_FEN:
                                 game_started = True
                                 starting_position = current_fen
                                 white_side = side
@@ -489,8 +483,8 @@ def main():
                         else:
                             rotated_midpoints = transformed_midpoints.copy()
 
-                        # Generiere FEN mit aktuellem Spieler am Zug
-                        current_fen = generate_fen_from_board(rotated_midpoints, piece_labels, player_to_move=current_player)
+                        # Generiere FEN
+                        current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
                         st.write(f"**Aktuelle FEN-Notation (Weiß spielt '{white_side}'):** {current_fen}")
 
                     # Speichere das aktuelle Frame (optional)
@@ -499,9 +493,9 @@ def main():
                     cv2.imwrite(image_path, cv2.cvtColor(display_frame, cv2.COLOR_RGB2BGR))
                     st.write(f"Bild gespeichert: {image_path}")
 
-                    # Wenn die aktuelle FEN sich von der vorherigen unterscheidet, ist ein Zug erfolgt
+                    # Wenn sich die Brettstellung verändert hat, ist ein Zug erfolgt
                     if previous_fen is not None and current_fen != previous_fen:
-                        st.write("Zug erkannt aufgrund von FEN-Änderung.")
+                        st.write("Zug erkannt aufgrund von Veränderung der Brettstellung.")
 
                         # Versuche, den genauen Zug zu ermitteln
                         move = get_move_between_positions(previous_fen, current_fen)
@@ -518,8 +512,6 @@ def main():
                         # Aktualisiere den vorherigen FEN
                         previous_fen = current_fen
 
-                        # **Spieler am Zug wird nicht mehr gewechselt, da er durch die Uhr bestimmt wird**
-
                     else:
                         if previous_fen is None:
                             # Setze die Startposition
@@ -527,10 +519,10 @@ def main():
                             fen_list.append(current_fen)
                             previous_fen = current_fen
                         else:
-                            st.write("Keine Änderung in der Stellung erkannt.")
+                            st.write("Keine Änderung in der Brettstellung erkannt.")
 
                     # Prüfe auf Schachmatt
-                    board = chess.Board(current_fen)
+                    board = chess.Board(current_fen + ' w - - 0 1')
                     if board.is_checkmate():
                         st.write("**Schachmatt!**")
                         game_over = True
