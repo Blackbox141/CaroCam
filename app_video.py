@@ -243,18 +243,13 @@ def generate_fen_from_board(midpoints, labels, grid_size=8):
 
     return fen_string
 
-def get_move_between_positions(previous_fen_full, current_fen_full):
-    # Extrahiere die Brettstellung (erster Teil der FEN)
-    previous_fen = previous_fen_full.split(' ')[0]
-    current_fen = current_fen_full.split(' ')[0]
-
-    # Erstelle die Schachbretter
-    previous_board = chess.Board(fen=previous_fen + ' w - - 0 1')
-    current_board = chess.Board(fen=current_fen + ' w - - 0 1')
+def get_move_between_positions(previous_fen, current_fen, current_player):
+    previous_board = chess.Board(fen=previous_fen + f" {current_player} - - 0 1")
+    current_board = chess.Board(fen=current_fen + f" {current_player} - - 0 1")
 
     move_made = None
 
-    # Generiere alle möglichen Züge aus der vorherigen Position
+    # Generiere alle legalen Züge aus der vorherigen Position
     for move in previous_board.legal_moves:
         # Erstelle eine Kopie des vorherigen Boards
         board_copy = previous_board.copy()
@@ -268,24 +263,19 @@ def get_move_between_positions(previous_fen_full, current_fen_full):
 
 def save_game_to_pgn(moves, starting_fen):
     game = chess.pgn.Game()
-    game.setup(chess.Board(starting_fen + ' w - - 0 1'))
+    game.setup(chess.Board(starting_fen))
 
     node = game
 
     for move_uci in moves:
-        if move_uci != "Unbekannter Zug":
-            move = chess.Move.from_uci(move_uci)
-            node = node.add_variation(move)
-        else:
-            # Bei unbekanntem Zug fügen wir einen Kommentar hinzu
-            node = node.add_variation(chess.Move.null())
-            node.comment = "Unbekannter Zug"
+        move = chess.Move.from_uci(move_uci)
+        node = node.add_variation(move)
 
     pgn_string = str(game)
     return pgn_string
 
 def main():
-    st.title("Schachspiel Analyse aus Video mit Fortschrittsanzeige 3")
+    st.title("Schachspiel Analyse aus Video mit Fortschrittsanzeige")
 
     # Video hochladen
     uploaded_file = st.file_uploader("Lade ein Video des Schachspiels hoch", type=["mp4", "avi", "mov"])
@@ -311,7 +301,6 @@ def main():
 
         # Variablen initialisieren
         previous_player_turn = None
-        previous_player_turn_stable = None  # Variable zur Speicherung des stabilen Spielerzugs
         stable_player_turn_count = 0  # Zähler für stabile Spielerzüge
         previous_fen = None
         move_list = []
@@ -322,6 +311,10 @@ def main():
         user_white_side = None  # Variable, um zu speichern, ob der Benutzer die Seite gewählt hat
         game_over = False
         frame_count = 0
+
+        # Bestimmen der Seitenzuordnung
+        left_player_color = None  # 'w' oder 'b'
+        right_player_color = None  # 'w' oder 'b'
 
         # Einmalige Schachbrett-Erkennung
         corners_detected = False
@@ -404,132 +397,138 @@ def main():
 
             previous_player_turn = player_turn
 
-            # Wenn der Spielerzug stabil ist (mindestens 5 aufeinanderfolgende Frames gleich)
-            if stable_player_turn_count >= 5:
-                # Prüfe, ob sich der stabile Spielerzug geändert hat
-                if previous_player_turn_stable != player_turn:
-                    st.write(f"Stabiler Uhrwechsel erkannt: {previous_player_turn_stable} -> {player_turn}")
+            # Schritt 2: Erkennung der Figuren
+            piece_midpoints, piece_labels, piece_image = detect_pieces(display_frame)
 
-                    # Speichere den neuen stabilen Spielerzug
-                    previous_player_turn_stable = player_turn
+            # Transformiere die Figurenkoordinaten
+            if piece_midpoints.shape[0] > 0:
+                ones = np.ones((piece_midpoints.shape[0], 1))
+                piece_midpoints_homogeneous = np.hstack([piece_midpoints, ones])
+                transformed_midpoints = M @ piece_midpoints_homogeneous.T
+                transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
+                transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
+            else:
+                transformed_midpoints = np.array([]).reshape(0, 2)
 
-                    # Nur Bilder anzeigen, wenn ein Zug erkannt wurde oder die Uhr sich geändert hat
-                    # Anzeige des Bildes mit der Schachuhr
-                    st.image(clock_image, caption=f'Analysiertes Frame {frame_count} - Schachuhr', use_column_width=True)
+            # Wenn white_side noch nicht bekannt ist, versuche es zu bestimmen
+            if white_side is None:
+                # Jetzt versuchen wir beide Rotationen
+                fen_found = False
 
-                    # Schritt 2: Erkennung der Figuren
-                    piece_midpoints, piece_labels, piece_image = detect_pieces(display_frame)
-
-                    # Anzeige des Bildes mit den erkannten Figuren
-                    st.image(piece_image, caption=f'Analysiertes Frame {frame_count} - Figuren', use_column_width=True)
-
-                    # Transformiere die Figurenkoordinaten
-                    if piece_midpoints.shape[0] > 0:
-                        ones = np.ones((piece_midpoints.shape[0], 1))
-                        piece_midpoints_homogeneous = np.hstack([piece_midpoints, ones])
-                        transformed_midpoints = M @ piece_midpoints_homogeneous.T
-                        transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
-                        transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
+                for side in ["Links", "Rechts"]:
+                    if side == "Links":
+                        # Weiß spielt links, keine Rotation
+                        rotated_midpoints = transformed_midpoints.copy()
+                        left_player_color = 'w'
+                        right_player_color = 'b'
+                    elif side == "Rechts":
+                        # Weiß spielt rechts, Brett um 180 Grad drehen
+                        rotated_midpoints = np.zeros_like(transformed_midpoints)
+                        rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 0]
+                        rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 1]
+                        left_player_color = 'b'
+                        right_player_color = 'w'
                     else:
-                        transformed_midpoints = np.array([]).reshape(0, 2)
+                        rotated_midpoints = transformed_midpoints.copy()
+                        left_player_color = 'w'
+                        right_player_color = 'b'
 
-                    # Wenn white_side noch nicht bekannt ist, versuche es zu bestimmen
-                    if white_side is None:
-                        # Jetzt versuchen wir beide Rotationen
-                        fen_found = False
+                    # Generiere FEN
+                    current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
+                    st.write(f"**Aktuelle FEN-Notation ({side}):** {current_fen}")
 
-                        for side in ["Links", "Rechts"]:
-                            if side == "Links":
-                                # Weiß spielt links, keine Rotation
-                                rotated_midpoints = transformed_midpoints.copy()
-                            elif side == "Rechts":
-                                # Weiß spielt rechts, Brett um 180 Grad drehen
-                                rotated_midpoints = np.zeros_like(transformed_midpoints)
-                                rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 0]
-                                rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 1]
-                            else:
-                                rotated_midpoints = transformed_midpoints.copy()
+                    # Prüfe, ob es die Grundstellung ist
+                    if current_fen == STARTING_FEN:
+                        game_started = True
+                        starting_position = current_fen
+                        white_side = side
+                        fen_found = True
+                        st.write(f"Weiß wurde auf der Seite '{white_side}' erkannt.")
+                        break
 
-                            # Generiere FEN
-                            current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
-                            st.write(f"**Aktuelle FEN-Notation ({side}):** {current_fen}")
-
-                            # Prüfe, ob es die Grundstellung ist
-                            if current_fen == STARTING_FEN:
-                                game_started = True
-                                starting_position = current_fen
-                                white_side = side
-                                fen_found = True
-                                st.write(f"Weiß wurde auf der Seite '{white_side}' erkannt.")
-                                break
-
-                        if not fen_found:
-                            # Fordere Benutzereingabe
-                            if user_white_side is None:
-                                st.write("Bitte wählen Sie, auf welcher Seite Weiß spielt:")
-                                user_white_side = st.selectbox("Weiß spielt auf:", ("Links", "Rechts"))
-                                white_side = user_white_side
-                                st.write(f"Weiß wurde auf der Seite '{white_side}' festgelegt.")
-                            else:
-                                white_side = user_white_side
+                if not fen_found:
+                    # Fordere Benutzereingabe
+                    if user_white_side is None:
+                        st.write("Bitte wählen Sie, auf welcher Seite Weiß spielt:")
+                        user_white_side = st.selectbox("Weiß spielt auf:", ("Links", "Rechts"))
+                        white_side = user_white_side
+                        st.write(f"Weiß wurde auf der Seite '{white_side}' festgelegt.")
                     else:
-                        # Verwende die bekannte white_side
+                        white_side = user_white_side
                         if white_side == "Links":
-                            rotated_midpoints = transformed_midpoints.copy()
-                        elif white_side == "Rechts":
-                            rotated_midpoints = np.zeros_like(transformed_midpoints)
-                            rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 0]
-                            rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 1]
+                            left_player_color = 'w'
+                            right_player_color = 'b'
                         else:
-                            rotated_midpoints = transformed_midpoints.copy()
+                            left_player_color = 'b'
+                            right_player_color = 'w'
+            else:
+                # Verwende die bekannte white_side
+                if white_side == "Links":
+                    rotated_midpoints = transformed_midpoints.copy()
+                    left_player_color = 'w'
+                    right_player_color = 'b'
+                elif white_side == "Rechts":
+                    rotated_midpoints = np.zeros_like(transformed_midpoints)
+                    rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 0]
+                    rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 1]
+                    left_player_color = 'b'
+                    right_player_color = 'w'
+                else:
+                    rotated_midpoints = transformed_midpoints.copy()
+                    left_player_color = 'w'
+                    right_player_color = 'b'
 
-                        # Generiere FEN
-                        current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
-                        st.write(f"**Aktuelle FEN-Notation (Weiß spielt '{white_side}'):** {current_fen}")
+            # Generiere FEN
+            current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
+            st.write(f"**Aktuelle FEN-Notation:** {current_fen}")
 
-                    # Speichere das aktuelle Frame (optional)
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    image_path = f"schachbrett_{timestamp}.png"
-                    cv2.imwrite(image_path, cv2.cvtColor(display_frame, cv2.COLOR_RGB2BGR))
-                    st.write(f"Bild gespeichert: {image_path}")
+            # Wenn die aktuelle FEN sich von der vorherigen unterscheidet, ist ein Zug erfolgt
+            if previous_fen is not None and current_fen != previous_fen:
+                st.write("Zug erkannt aufgrund von FEN-Änderung.")
 
-                    # Wenn sich die Brettstellung verändert hat, ist ein Zug erfolgt
-                    if previous_fen is not None and current_fen != previous_fen:
-                        st.write("Zug erkannt aufgrund von Veränderung der Brettstellung.")
-
-                        # Versuche, den genauen Zug zu ermitteln
-                        move = get_move_between_positions(previous_fen, current_fen)
-                        if move is not None:
-                            move_list.append(move.uci())
-                            st.write(f"Erkannter Zug: {move.uci()}")
-                        else:
-                            st.write("Genauer Zug konnte nicht ermittelt werden.")
-                            move_list.append("Unbekannter Zug")
-
-                        # Füge die aktuelle FEN hinzu, wenn sie nicht identisch zur letzten gespeicherten FEN ist
-                        if len(fen_list) == 0 or current_fen != fen_list[-1]:
-                            fen_list.append(current_fen)
-                        # Aktualisiere den vorherigen FEN
-                        previous_fen = current_fen
-
+                # Bestimme den Spieler, der den Zug gemacht hat, basierend auf der Uhr
+                if previous_player_turn is not None and stable_player_turn_count >= 5:
+                    if previous_player_turn == 'left':
+                        current_player = right_player_color
+                    elif previous_player_turn == 'right':
+                        current_player = left_player_color
                     else:
-                        if previous_fen is None:
-                            # Setze die Startposition
-                            starting_position = current_fen
-                            fen_list.append(current_fen)
-                            previous_fen = current_fen
-                        else:
-                            st.write("Keine Änderung in der Brettstellung erkannt.")
+                        current_player = 'w'  # Standardwert
+                else:
+                    current_player = 'w'  # Standardwert
 
-                    # Prüfe auf Schachmatt
-                    board = chess.Board(current_fen + ' w - - 0 1')
-                    if board.is_checkmate():
-                        st.write("**Schachmatt!**")
-                        game_over = True
+                # Aktualisiere die FEN mit dem aktuellen Spieler am Zug
+                current_fen_with_player = current_fen + f" {current_player} - - 0 1"
+                previous_fen_with_player = previous_fen + f" {current_player} - - 0 1"
+
+                st.write(f"**Aktualisierte FEN mit Spieler am Zug:** {current_fen_with_player}")
+
+                # Versuche, den genauen Zug zu ermitteln
+                move = get_move_between_positions(previous_fen, current_fen, current_player)
+                if move is not None:
+                    move_list.append(move.uci())
+                    st.write(f"Erkannter Zug: {move.uci()}")
+                else:
+                    st.write("Genauer Zug konnte nicht ermittelt werden.")
+                    move_list.append("Unbekannter Zug")
+
+                # Füge die aktuelle FEN hinzu, wenn sie nicht identisch zur letzten gespeicherten FEN ist
+                if len(fen_list) == 0 or current_fen_with_player != fen_list[-1]:
+                    fen_list.append(current_fen_with_player)
+                # Aktualisiere den vorherigen FEN
+                previous_fen = current_fen
+
+                # Aktualisiere den stabilen Spielerzug nur, wenn eine Figurenbewegung stattgefunden hat
+                previous_player_turn_stable = previous_player_turn
 
             else:
-                # Spielerzug ist nicht stabil genug oder 'hold' oder None
-                pass  # Nichts tun
+                if previous_fen is None:
+                    # Setze die Startposition
+                    starting_position = current_fen
+                    fen_list.append(current_fen)
+                    previous_fen = current_fen
+                else:
+                    st.write("Keine Änderung in der Stellung erkannt.")
 
             # Kurze Pause, um die GUI nicht zu überlasten
             # time.sleep(0.1)
@@ -545,7 +544,7 @@ def main():
 
         # Wenn das Spiel gestartet hat, zeige die PGN
         if game_started and move_list:
-            pgn_string = save_game_to_pgn(move_list, starting_position)
+            pgn_string = save_game_to_pgn(move_list, starting_position + " w - - 0 1")
             st.write("**PGN des Spiels:**")
             st.code(pgn_string)
         else:
