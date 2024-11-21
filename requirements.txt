@@ -20,3 +20,4 @@ opencv-python-headless
 opencv-contrib-python
 opencv-python
 imageio
+imageio[ffmpeg]
