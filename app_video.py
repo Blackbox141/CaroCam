@@ -3,30 +3,36 @@ import numpy as np
 import cv2
 from ultralytics import YOLO
 import os
+import requests
 import chess
 import chess.pgn
 import tempfile
 from PIL import Image
+import time
 import datetime
 
-# Get the current script directory
+# Holen des aktuellen Skriptverzeichnisses
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Relative paths to the models for detection
+# Relativer Pfad zum Modell zur Erkennung der Schachfiguren
 piece_model_path = os.path.join(BASE_DIR, 'Figure Detection', 'runs', 'detect', 'yolov8-chess28', 'weights', 'best.pt')
+
+# Relativer Pfad zum Modell zur Erkennung der Eckpunkte
 corner_model_path = os.path.join(BASE_DIR, 'Corner Detection', 'runs', 'detect', 'yolov8n_corner12', 'weights', 'best.pt')
+
+# Relativer Pfad zum Modell zur Erkennung des Spielers am Zug (Schachuhr)
 clock_model_path = os.path.join(BASE_DIR, 'Clock Detection 1', 'runs', 'detect', 'yolov8-chess3', 'weights', 'best.pt')
 
-# Load the YOLO models with the relative paths
+# Laden der YOLO-Modelle mit den relativen Pfaden
 if os.path.exists(piece_model_path) and os.path.exists(corner_model_path) and os.path.exists(clock_model_path):
     piece_model = YOLO(piece_model_path)
     corner_model = YOLO(corner_model_path)
     clock_model = YOLO(clock_model_path)
 else:
-    st.error(f"Model file not found. Check the paths:\nPiece model: {piece_model_path}\nCorner model: {corner_model_path}\nClock model: {clock_model_path}")
+    st.error(f"Modelldatei nicht gefunden. Überprüfe die Pfade:\nPiece model: {piece_model_path}\nCorner model: {corner_model_path}\nClock model: {clock_model_path}")
     st.stop()
 
-# FEN mapping for pieces
+# FEN-Zeichen für Figuren
 FEN_MAPPING = {
     'Black Pawn': 'p',
     'Black Bishop': 'b',
@@ -42,108 +48,104 @@ FEN_MAPPING = {
     'White Knight': 'N'
 }
 
-# Fixed values for correction vector
-PERCENT_AB = 0.17  # Example value: 17% of the distance AB
-PERCENT_BC = -0.07  # Example value: -7% of the distance BC
+# Festlegen der festen Werte für den Korrekturvektor
+PERCENT_AB = 0.17  # Beispielwert: 17% der Strecke AB
+PERCENT_BC = -0.07  # Beispielwert: -7% der Strecke BC
 
-# Starting position FEN
+# Grundstellung FEN
 STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
 
 def detect_pieces(image):
     results = piece_model.predict(image, conf=0.1, iou=0.3, imgsz=1400)
-    class_names = piece_model.model.names  # Access class names
+    class_names = piece_model.model.names  # Zugriff auf die Klassennamen
     result = results[0]
 
     midpoints = []
     labels = []
-    confidences = []
     boxes = result.boxes
 
     for box in boxes:
         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
         cls_id = int(box.cls.cpu().numpy()[0])
         label = class_names[cls_id]
-        conf = box.conf.cpu().numpy()[0]  # Confidence Score
+        conf = box.conf.cpu().numpy()[0] * 100  # Confidence Score in Prozent
 
-        # Only proceed if confidence is above a threshold
-        if conf < 0.5:  # Adjust threshold as needed
-            continue
-
-        # Calculate the midpoint of the lower half of the bounding box
+        # Berechnung des Mittelpunkts der unteren Hälfte der Bounding Box
         mid_x = x1 + (x2 - x1) / 2
-        mid_y = y1 + (y2 - y1) * 0.75  # Middle of the lower half
+        mid_y = y1 + (y2 - y1) * 0.75  # Mitte der unteren Hälfte
 
         midpoints.append([mid_x, mid_y])
         labels.append(label)
-        confidences.append(conf)
 
-        # Draw the bounding box and label with confidence score on the image
+        # Zeichne die Bounding Box und das Label mit Confidence Score auf das Bild
         cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-        text = f"{label}: {conf*100:.1f}%"
+        text = f"{label}: {conf:.1f}%"
+        # Erhöhen der Schriftgröße
         cv2.putText(image, text, (int(x1), int(y1)-10), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2, cv2.LINE_AA)
 
-    return np.array(midpoints), labels, confidences, image
+    return np.array(midpoints), labels, image
 
 def detect_corners(image):
     results = corner_model(image)
-    class_names = corner_model.model.names  # Access class names
+    class_names = corner_model.model.names  # Zugriff auf die Klassennamen
     points = {}
 
     for box in results[0].boxes:
-        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-        center_x = int((x1 + x2) / 2)
-        center_y = int((y1 + y2) / 2)
+        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()  # (x1, y1, x2, y2)
+        center_x = int((x1 + x2) / 2)  # Mittelpunkt der Bounding Box (x)
+        center_y = int((y1 + y2) / 2)  # Mittelpunkt der Bounding Box (y)
 
         cls_id = int(box.cls.cpu().numpy()[0])
-        label = class_names[cls_id]
 
-        if label == 'A':
+        # Klassennamen im YOLO-Modell zuordnen
+        if cls_id == 0:  # A
             points["A"] = np.array([center_x, center_y])
-        elif label == 'B':
+        elif cls_id == 1:  # B
             points["B"] = np.array([center_x, center_y])
-        elif label == 'C':
+        elif cls_id == 2:  # C
             points["C"] = np.array([center_x, center_y])
 
+        # Zeichne die Eckpunkte auf das Bild
+        label = class_names[cls_id]
         cv2.circle(image, (center_x, center_y), 5, (0, 0, 255), -1)
+        # Erhöhen der Schriftgröße
         cv2.putText(image, label, (center_x + 10, center_y), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2, cv2.LINE_AA)
 
     if len(points) != 3:
+        # Wenn nicht alle Eckpunkte erkannt wurden, gebe None zurück
         return None, image
 
     return points, image
 
 def detect_player_turn(image):
     results = clock_model.predict(image, conf=0.1, iou=0.3, imgsz=1400)
-    class_names = clock_model.model.names  # Access class names
+    class_names = clock_model.model.names  # Zugriff auf die Klassennamen
     result = results[0]
     boxes = result.boxes
 
+    # Initialisiere die Label-Liste
     labels = []
-    confidences = []
 
     for box in boxes:
         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
         cls_id = int(box.cls.cpu().numpy()[0])
         label = class_names[cls_id]
-        conf = box.conf.cpu().numpy()[0]
-
-        # Only proceed if confidence is above a threshold
-        if conf < 0.5:  # Adjust threshold as needed
-            continue
-
         labels.append(label)
 
+        # Zeichne die Bounding Box und das Label auf das Bild
         cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (255, 255, 0), 2)
+        # Erhöhen der Schriftgröße
         cv2.putText(image, label, (int(x1), int(y1)-10), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2, cv2.LINE_AA)
 
-    # Determine who is to move based on labels
-    if 'left' in labels and 'right' not in labels:
+    # Bestimme anhand der Labels, wer am Zug ist
+    if 'left' in labels:
         player_turn = 'left'
-    elif 'right' in labels and 'left' not in labels:
+    elif 'right' in labels:
         player_turn = 'right'
     else:
-        player_turn = None  # Require user input or hold
+        player_turn = None  # Fordere Benutzereingabe
 
+    # Überprüfe, ob 'hold' erkannt wurde
     if 'hold' in labels:
         player_turn = 'hold'
 
@@ -155,34 +157,71 @@ def calculate_point_D(A, B, C):
     return D_calculated
 
 def adjust_point_D(A, B, C, D_calculated, percent_AB, percent_BC):
+    # Berechnung der Vektoren AB und BC
     AB = B - A
     BC = C - B
+
+    # Berechnung des Korrekturvektors
     correction_vector = percent_AB * AB + percent_BC * BC
+
+    # Anwenden des Korrekturvektors auf D_calculated
     D_corrected = D_calculated + correction_vector
+
     return D_corrected
 
 def sort_points(A, B, C, D):
     points = np.array([A, B, C, D])
+    # Sortiere die Punkte nach der y-Koordinate (oben und unten)
     points = sorted(points, key=lambda x: x[1])
-    top_points = sorted(points[:2], key=lambda x: x[0])  # A and D
-    bottom_points = sorted(points[2:], key=lambda x: x[0])  # B and C
-    A_sorted, D_sorted = top_points
-    B_sorted, C_sorted = bottom_points
+    # Sortiere die oberen Punkte nach der x-Koordinate
+    top_points = sorted(points[:2], key=lambda x: x[0])  # Obere Punkte (A und D)
+    # Sortiere die unteren Punkte nach der x-Koordinate
+    bottom_points = sorted(points[2:], key=lambda x: x[0])  # Untere Punkte (B und C)
+    # Weisen den sortierten Punkten die richtige Position zu
+    A_sorted, D_sorted = top_points  # A ist oben links, D ist oben rechts
+    B_sorted, C_sorted = bottom_points  # B ist unten links, C ist unten rechts
     return np.array([A_sorted, B_sorted, C_sorted, D_sorted], dtype=np.float32)
 
-def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
-    board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
-    step_size = 800 // grid_size
+def warp_perspective(image, src_points):
+    dst_size = 800  # Zielgröße 800x800 Pixel für das quadratische Schachbrett
+    dst_points = np.array([
+        [0, 0],  # A' (oben links)
+        [0, dst_size - 1],  # B' (unten links)
+        [dst_size - 1, dst_size - 1],  # C' (unten rechts)
+        [dst_size - 1, 0]  # D' (oben rechts)
+    ], dtype=np.float32)
 
+    # Perspektivtransformation berechnen
+    M = cv2.getPerspectiveTransform(src_points, dst_points)
+
+    # Perspektivtransformation anwenden
+    warped_image = cv2.warpPerspective(image, M, (dst_size, dst_size))
+
+    return warped_image, M
+
+def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
+    # Erstelle ein leeres Schachbrett (8x8)
+    board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
+
+    step_size = 800 // grid_size  # Größe jeder Zelle
+
+    # Fülle das Board mit den Figuren basierend auf den erkannten Mittelpunkten
     for point, label in zip(midpoints, labels):
         x, y = point
+
+        # Tausche x und y und invertiere die x-Achse
         col = int(y // step_size)
         row = 7 - int(x // step_size)
 
+        # Prüfe, ob die Position innerhalb der Grenzen liegt
         if 0 <= row < grid_size and 0 <= col < grid_size:
             fen_char = FEN_MAPPING.get(label, '')
             board[row][col] = fen_char
+        else:
+            # Ignoriere Figuren außerhalb des Schachbretts
+            pass
 
+    # Erstelle die FEN-Notation
     fen_rows = []
     for row in board:
         fen_row = ''
@@ -199,7 +238,9 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
             fen_row += str(empty_count)
         fen_rows.append(fen_row)
 
+    # Verbinde alle Zeilen mit Schrägstrichen und füge die zusätzlichen Informationen hinzu
     fen_string = '/'.join(fen_rows) + f" {player_to_move} - - 0 1"
+
     return fen_string
 
 def get_move_between_positions(previous_fen, current_fen):
@@ -208,17 +249,22 @@ def get_move_between_positions(previous_fen, current_fen):
 
     move_made = None
 
+    # Generiere alle legalen Züge aus der vorherigen Position
     for move in previous_board.legal_moves:
+        # Erstelle eine Kopie des vorherigen Boards
         board_copy = previous_board.copy()
+        # Führe den Zug aus
         board_copy.push(move)
+        # Vergleiche die Stellung
         if board_copy.board_fen() == current_board.board_fen():
-            return move  # Move found
+            return move  # Zug gefunden
 
-    return None  # No move found
+    return None  # Kein Zug gefunden
 
 def save_game_to_pgn(moves, starting_fen):
     game = chess.pgn.Game()
     game.setup(chess.Board(starting_fen))
+
     node = game
 
     for move_uci in moves:
@@ -231,46 +277,45 @@ def save_game_to_pgn(moves, starting_fen):
 def main():
     st.title("Schachspiel Analyse aus Video mit Fortschrittsanzeige")
 
-    # Upload video
+    # Video hochladen
     uploaded_file = st.file_uploader("Lade ein Video des Schachspiels hoch", type=["mp4", "avi", "mov"])
 
     if uploaded_file is not None:
-        # Create temporary file
+        # Temporäre Datei erstellen
         tfile = tempfile.NamedTemporaryFile(delete=False)
         tfile.write(uploaded_file.read())
 
         cap = cv2.VideoCapture(tfile.name)
 
-        # Get frame rate
+        # Framerate des Videos erhalten
         fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_interval = 1
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        frame_interval = 1  # Hier können Sie den Abstand zwischen den ausgewerteten Frames einstellen
+        # Wenn frame_interval = 1, wird jedes Frame analysiert
+        # Wenn frame_interval = fps, wird etwa jede Sekunde ein Frame analysiert
+        # Sie können den Wert entsprechend anpassen
 
-        # Initialize progress bar
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))  # Gesamtanzahl der Frames
+
+        # Fortschrittsbalken initialisieren
         progress_bar = st.progress(0)
 
-        # Initialize variables
+        # Variablen initialisieren
         previous_player_turn = None
-        previous_player_turn_stable = None
-        player_turn_buffer = []
+        previous_player_turn_stable = None  # Variable zur Speicherung des stabilen Spielerzugs
+        stable_player_turn_count = 0  # Zähler für stabile Spielerzüge
         previous_fen = None
         move_list = []
-        fen_list = []
+        fen_list = []  # Liste zum Speichern der FENs
         game_started = False
         starting_position = None
         white_side = None
-        user_white_side = None
+        user_white_side = None  # Variable, um zu speichern, ob der Benutzer die Seite gewählt hat
         game_over = False
         frame_count = 0
 
-        current_player = 'w'  # Start with white
+        current_player = 'w'  # Startspieler Weiß
 
-        # FEN buffer for stability check
-        fen_buffer = []
-        FEN_STABILITY_THRESHOLD = 3
-        PLAYER_TURN_STABILITY_THRESHOLD = 5
-
-        # Single board detection
+        # Einmalige Schachbrett-Erkennung
         corners_detected = False
 
         while not corners_detected:
@@ -281,23 +326,33 @@ def main():
 
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-            # Step 1: Detect corners
+            # Schritt 1: Erkennung der Eckpunkte
             detected_points, corner_image = detect_corners(frame_rgb)
 
             if detected_points is None:
+                # Keine Ecken erkannt
                 st.image(corner_image, caption='Eckpunkte nicht erkannt, nächstes Frame wird analysiert.', use_column_width=True)
-                continue
+                continue  # Nächstes Frame lesen
             else:
+                # Ecken erkannt
                 corners_detected = True
+                # Anzeige des Bildes mit den erkannten Eckpunkten
                 st.image(corner_image, caption='Erkannte Eckpunkte', use_column_width=True)
+                # Speichere die erkannten Punkte
                 A = detected_points["A"]
                 B = detected_points["B"]
                 C = detected_points["C"]
 
-        # Step 2: Calculate point D and perspective transformation
+        # Schritt 2: Berechnung der Ecke D und Perspektivtransformation
         D_calculated = calculate_point_D(A, B, C)
+
+        # Anpassung des Punktes D mit dem festen Korrekturvektor
         D_corrected = adjust_point_D(A, B, C, D_calculated, PERCENT_AB, PERCENT_BC)
+
+        # Sortiere die Punkte
         sorted_points = sort_points(A, B, C, D_corrected.astype(int))
+
+        # Perspektivtransformation berechnen
         M = cv2.getPerspectiveTransform(sorted_points, np.array([
             [0, 0],
             [0, 799],
@@ -305,162 +360,198 @@ def main():
             [799, 0]
         ], dtype=np.float32))
 
-        # Reset video
+        # Video zurücksetzen
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
-        # Process video
+        # Video durchlaufen
         while cap.isOpened() and not game_over:
             ret, frame = cap.read()
             if not ret:
                 break
 
             frame_count += 1
+
+            # Fortschrittsbalken aktualisieren
             progress = frame_count / total_frames
             progress_bar.progress(min(progress, 1.0))
 
+            # Überspringen von Frames basierend auf frame_interval
             if frame_count % frame_interval != 0:
-                continue
+                continue  # Überspringe dieses Frame
 
+            # Konvertiere das Frame in RGB
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # Kopie des Frames für die Anzeige
             display_frame = frame_rgb.copy()
 
-            # Step 1: Detect player turn
+            # Schritt 1: Erkennung der Schachuhr
             player_turn, clock_image = detect_player_turn(display_frame)
 
-            # Update player turn buffer
-            if player_turn is not None and player_turn != 'hold':
-                player_turn_buffer.append(player_turn)
-                if len(player_turn_buffer) > PLAYER_TURN_STABILITY_THRESHOLD:
-                    player_turn_buffer.pop(0)
-                if len(player_turn_buffer) == PLAYER_TURN_STABILITY_THRESHOLD and all(pt == player_turn_buffer[0] for pt in player_turn_buffer):
-                    # Player turn is stable
-                    if previous_player_turn_stable != player_turn_buffer[0]:
-                        previous_player_turn_stable = player_turn_buffer[0]
-                        st.write(f"Stabiler Uhrwechsel erkannt: {previous_player_turn} -> {player_turn_buffer[0]}")
+            # Prüfe, ob der Spielerzug stabil ist (gleicher Wert in fünf aufeinanderfolgenden Frames)
+            if player_turn == previous_player_turn:
+                stable_player_turn_count += 1
+            else:
+                stable_player_turn_count = 1  # Reset auf 1, da aktueller player_turn einmalig aufgetreten ist
 
-                        # Determine current player
-                        if previous_player_turn == 'left' and player_turn_buffer[0] == 'right':
-                            current_player = 'b'
-                        elif previous_player_turn == 'right' and player_turn_buffer[0] == 'left':
+            previous_player_turn = player_turn
+
+            # Wenn der Spielerzug stabil ist (mindestens 5 aufeinanderfolgende Frames gleich)
+            if stable_player_turn_count >= 5 and player_turn != 'hold' and player_turn is not None:
+                # Prüfe, ob sich der stabile Spielerzug geändert hat
+                if previous_player_turn_stable != player_turn:
+                    st.write(f"Stabiler Uhrwechsel erkannt: {previous_player_turn_stable} -> {player_turn}")
+
+                    # Bestimme den Spieler am Zug basierend auf dem Uhrwechsel
+                    if previous_player_turn_stable == 'left' and player_turn == 'right':
+                        # Spieler auf der linken Seite hat einen Zug gemacht
+                        current_player = 'b'  # Jetzt ist Schwarz am Zug
+                    elif previous_player_turn_stable == 'right' and player_turn == 'left':
+                        # Spieler auf der rechten Seite hat einen Zug gemacht
+                        current_player = 'w'  # Jetzt ist Weiß am Zug
+                    # Initialisierung
+                    elif previous_player_turn_stable is None:
+                        if player_turn == 'left':
                             current_player = 'w'
-                        elif previous_player_turn is None:
-                            if player_turn_buffer[0] == 'left':
-                                current_player = 'w'
-                            elif player_turn_buffer[0] == 'right':
-                                current_player = 'b'
+                        elif player_turn == 'right':
+                            current_player = 'b'
 
-                        previous_player_turn = player_turn_buffer[0]
+                    # Speichere den neuen stabilen Spielerzug
+                    previous_player_turn_stable = player_turn
 
-                        # Display clock image
-                        st.image(clock_image, caption=f'Analysiertes Frame {frame_count} - Schachuhr', use_column_width=True)
+                    # Nur Bilder anzeigen, wenn ein Zug erkannt wurde oder die Uhr sich geändert hat
+                    # Anzeige des Bildes mit der Schachuhr
+                    st.image(clock_image, caption=f'Analysiertes Frame {frame_count} - Schachuhr', use_column_width=True)
 
-                        # Step 2: Detect pieces
-                        piece_midpoints, piece_labels, piece_confs, piece_image = detect_pieces(display_frame)
+                    # Schritt 2: Erkennung der Figuren
+                    piece_midpoints, piece_labels, piece_image = detect_pieces(display_frame)
 
-                        # Display piece detection image
-                        st.image(piece_image, caption=f'Analysiertes Frame {frame_count} - Figuren', use_column_width=True)
+                    # Anzeige des Bildes mit den erkannten Figuren
+                    st.image(piece_image, caption=f'Analysiertes Frame {frame_count} - Figuren', use_column_width=True)
 
-                        # Transform piece coordinates
-                        if piece_midpoints.shape[0] > 0:
-                            ones = np.ones((piece_midpoints.shape[0], 1))
-                            piece_midpoints_homogeneous = np.hstack([piece_midpoints, ones])
-                            transformed_midpoints = M @ piece_midpoints_homogeneous.T
-                            transformed_midpoints /= transformed_midpoints[2, :]
-                            transformed_midpoints = transformed_midpoints[:2, :].T
-                        else:
-                            transformed_midpoints = np.array([]).reshape(0, 2)
+                    # Transformiere die Figurenkoordinaten
+                    if piece_midpoints.shape[0] > 0:
+                        ones = np.ones((piece_midpoints.shape[0], 1))
+                        piece_midpoints_homogeneous = np.hstack([piece_midpoints, ones])
+                        transformed_midpoints = M @ piece_midpoints_homogeneous.T
+                        transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
+                        transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
+                    else:
+                        transformed_midpoints = np.array([]).reshape(0, 2)
 
-                        # Determine white's side
-                        if white_side is None:
-                            fen_found = False
-                            for side in ["Links", "Rechts"]:
-                                if side == "Links":
-                                    rotated_midpoints = transformed_midpoints.copy()
-                                elif side == "Rechts":
-                                    rotated_midpoints = np.zeros_like(transformed_midpoints)
-                                    rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 0]
-                                    rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 1]
+                    # Wenn white_side noch nicht bekannt ist, versuche es zu bestimmen
+                    if white_side is None:
+                        # Jetzt versuchen wir beide Rotationen
+                        fen_found = False
 
-                                current_fen = generate_fen_from_board(rotated_midpoints, piece_labels, player_to_move=current_player)
-                                st.write(f"**Aktuelle FEN-Notation ({side}):** {current_fen}")
-
-                                if current_fen.startswith(STARTING_FEN):
-                                    game_started = True
-                                    starting_position = current_fen
-                                    white_side = side
-                                    fen_found = True
-                                    st.write(f"Weiß wurde auf der Seite '{white_side}' erkannt.")
-                                    break
-
-                            if not fen_found:
-                                if user_white_side is None:
-                                    st.write("Bitte wählen Sie, auf welcher Seite Weiß spielt:")
-                                    user_white_side = st.selectbox("Weiß spielt auf:", ("Links", "Rechts"))
-                                    white_side = user_white_side
-                                    st.write(f"Weiß wurde auf der Seite '{white_side}' festgelegt.")
-                                else:
-                                    white_side = user_white_side
-                        else:
-                            if white_side == "Links":
+                        for side in ["Links", "Rechts"]:
+                            if side == "Links":
+                                # Weiß spielt links, keine Rotation
                                 rotated_midpoints = transformed_midpoints.copy()
-                            elif white_side == "Rechts":
+                            elif side == "Rechts":
+                                # Weiß spielt rechts, Brett um 180 Grad drehen
                                 rotated_midpoints = np.zeros_like(transformed_midpoints)
                                 rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 0]
                                 rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 1]
+                            else:
+                                rotated_midpoints = transformed_midpoints.copy()
 
+                            # Generiere FEN
                             current_fen = generate_fen_from_board(rotated_midpoints, piece_labels, player_to_move=current_player)
-                            st.write(f"**Aktuelle FEN-Notation (Weiß spielt '{white_side}'):** {current_fen}")
+                            st.write(f"**Aktuelle FEN-Notation ({side}):** {current_fen}")
 
-                        # Update FEN buffer
-                        fen_buffer.append(current_fen)
-                        if len(fen_buffer) > FEN_STABILITY_THRESHOLD:
-                            fen_buffer.pop(0)
+                            # Prüfe, ob es die Grundstellung ist
+                            if current_fen.startswith(STARTING_FEN):
+                                game_started = True
+                                starting_position = current_fen
+                                white_side = side
+                                fen_found = True
+                                st.write(f"Weiß wurde auf der Seite '{white_side}' erkannt.")
+                                break
 
-                        # Check if FEN is stable
-                        if len(fen_buffer) == FEN_STABILITY_THRESHOLD and all(fen == fen_buffer[0] for fen in fen_buffer):
-                            if previous_fen != fen_buffer[0]:
-                                st.write("Zug erkannt aufgrund von FEN-Änderung.")
-
-                                # Determine the move
-                                if previous_fen is not None:
-                                    move = get_move_between_positions(previous_fen, fen_buffer[0])
-                                    if move is not None:
-                                        move_list.append(move.uci())
-                                        st.write(f"Erkannter Zug: {move.uci()}")
-                                    else:
-                                        st.write("Genauer Zug konnte nicht ermittelt werden.")
-                                        move_list.append("Unbekannter Zug")
-
-                                if len(fen_list) == 0 or fen_buffer[0] != fen_list[-1]:
-                                    fen_list.append(fen_buffer[0])
-
-                                previous_fen = fen_buffer[0]
-
-                                # Check for checkmate
-                                board = chess.Board(fen_buffer[0])
-                                if board.is_checkmate():
-                                    st.write("**Schachmatt!**")
-                                    game_over = True
-
+                        if not fen_found:
+                            # Fordere Benutzereingabe
+                            if user_white_side is None:
+                                st.write("Bitte wählen Sie, auf welcher Seite Weiß spielt:")
+                                user_white_side = st.selectbox("Weiß spielt auf:", ("Links", "Rechts"))
+                                white_side = user_white_side
+                                st.write(f"Weiß wurde auf der Seite '{white_side}' festgelegt.")
+                            else:
+                                white_side = user_white_side
+                    else:
+                        # Verwende die bekannte white_side
+                        if white_side == "Links":
+                            rotated_midpoints = transformed_midpoints.copy()
+                        elif white_side == "Rechts":
+                            rotated_midpoints = np.zeros_like(transformed_midpoints)
+                            rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 0]
+                            rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 1]
                         else:
-                            st.write("FEN ist noch nicht stabil.")
+                            rotated_midpoints = transformed_midpoints.copy()
 
-                else:
-                    st.write("Spielerzug ist noch nicht stabil.")
+                        # Generiere FEN mit aktuellem Spieler am Zug
+                        current_fen = generate_fen_from_board(rotated_midpoints, piece_labels, player_to_move=current_player)
+                        st.write(f"**Aktuelle FEN-Notation (Weiß spielt '{white_side}'):** {current_fen}")
+
+                    # Speichere das aktuelle Frame (optional)
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    image_path = f"schachbrett_{timestamp}.png"
+                    cv2.imwrite(image_path, cv2.cvtColor(display_frame, cv2.COLOR_RGB2BGR))
+                    st.write(f"Bild gespeichert: {image_path}")
+
+                    # Wenn die aktuelle FEN sich von der vorherigen unterscheidet, ist ein Zug erfolgt
+                    if previous_fen is not None and current_fen != previous_fen:
+                        st.write("Zug erkannt aufgrund von FEN-Änderung.")
+
+                        # Versuche, den genauen Zug zu ermitteln
+                        move = get_move_between_positions(previous_fen, current_fen)
+                        if move is not None:
+                            move_list.append(move.uci())
+                            st.write(f"Erkannter Zug: {move.uci()}")
+                        else:
+                            st.write("Genauer Zug konnte nicht ermittelt werden.")
+                            move_list.append("Unbekannter Zug")
+
+                        # Füge die aktuelle FEN hinzu, wenn sie nicht identisch zur letzten gespeicherten FEN ist
+                        if len(fen_list) == 0 or current_fen != fen_list[-1]:
+                            fen_list.append(current_fen)
+                        # Aktualisiere den vorherigen FEN
+                        previous_fen = current_fen
+
+                        # **Spieler am Zug wird nicht mehr gewechselt, da er durch die Uhr bestimmt wird**
+
+                    else:
+                        if previous_fen is None:
+                            # Setze die Startposition
+                            starting_position = current_fen
+                            fen_list.append(current_fen)
+                            previous_fen = current_fen
+                        else:
+                            st.write("Keine Änderung in der Stellung erkannt.")
+
+                    # Prüfe auf Schachmatt
+                    board = chess.Board(current_fen)
+                    if board.is_checkmate():
+                        st.write("**Schachmatt!**")
+                        game_over = True
 
             else:
-                pass  # Do nothing
+                # Spielerzug ist nicht stabil genug oder 'hold' oder None
+                pass  # Nichts tun
+
+            # Kurze Pause, um die GUI nicht zu überlasten
+            # time.sleep(0.1)
 
         cap.release()
         st.write("Videoverarbeitung abgeschlossen.")
 
-        # Display FEN list
+        # Zeige die Liste der FENs an
         if fen_list:
             st.write("**Liste der erkannten FENs:**")
             for idx, fen in enumerate(fen_list):
                 st.write(f"Position {idx+1}: {fen}")
 
-        # Generate PGN if game started
+        # Wenn das Spiel gestartet hat, zeige die PGN
         if game_started and move_list:
             pgn_string = save_game_to_pgn(move_list, starting_position)
             st.write("**PGN des Spiels:**")
