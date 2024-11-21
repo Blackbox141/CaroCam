@@ -339,7 +339,7 @@ def save_game_to_pgn(moves, starting_fen):
     return pgn_string
 
 def main():
-    st.title("Schachspiel Analyse aus Video P")
+    st.title("Schachspiel Analyse aus Video")
 
     # Video hochladen
     uploaded_file = st.file_uploader("Lade ein Video des Schachspiels hoch", type=["mp4", "avi", "mov"])
@@ -444,41 +444,47 @@ def main():
                 transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
                 transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
 
-                # Jetzt versuchen wir beide Rotationen
-                fen_found = False
+                # Wenn white_side noch nicht bekannt ist, versuche es zu bestimmen
+                if white_side is None:
+                    # Jetzt versuchen wir beide Rotationen
+                    fen_found = False
 
-                for side in ["Links", "Rechts"]:
-                    if side == "Links":
-                        # Weiß spielt links, keine Rotation
-                        rotated_midpoints = transformed_midpoints.copy()
-                    elif side == "Rechts":
-                        # Weiß spielt rechts, Brett um 180 Grad drehen
-                        rotated_midpoints = np.zeros_like(transformed_midpoints)
-                        rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 0]
-                        rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 1]
-                    else:
-                        rotated_midpoints = transformed_midpoints.copy()
+                    for side in ["Links", "Rechts"]:
+                        if side == "Links":
+                            # Weiß spielt links, keine Rotation
+                            rotated_midpoints = transformed_midpoints.copy()
+                        elif side == "Rechts":
+                            # Weiß spielt rechts, Brett um 180 Grad drehen
+                            rotated_midpoints = np.zeros_like(transformed_midpoints)
+                            rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 0]
+                            rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 1]
+                        else:
+                            rotated_midpoints = transformed_midpoints.copy()
 
-                    # Generiere FEN
-                    current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
-                    st.write(f"**Aktuelle FEN-Notation ({side}):** {current_fen}")
+                        # Generiere FEN
+                        current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
+                        st.write(f"**Aktuelle FEN-Notation ({side}):** {current_fen}")
 
-                    # Prüfe, ob es die Grundstellung ist
-                    if current_fen.startswith(STARTING_FEN):
-                        game_started = True
-                        starting_position = current_fen
-                        white_side = side
-                        fen_found = True
-                        break
+                        # Prüfe, ob es die Grundstellung ist
+                        if current_fen.startswith(STARTING_FEN):
+                            game_started = True
+                            starting_position = current_fen
+                            white_side = side
+                            fen_found = True
+                            st.write(f"Weiß wurde auf der Seite '{white_side}' erkannt.")
+                            break
 
-                if not fen_found:
-                    # Fordere Benutzereingabe
-                    if user_white_side is None:
-                        st.write("Bitte wählen Sie, auf welcher Seite Weiß spielt:")
-                        user_white_side = st.selectbox("Weiß spielt auf:", ("Links", "Rechts"))
-                        white_side = user_white_side
-
-                    # Rotierte Midpoints entsprechend der gewählten Seite
+                    if not fen_found:
+                        # Fordere Benutzereingabe
+                        if user_white_side is None:
+                            st.write("Bitte wählen Sie, auf welcher Seite Weiß spielt:")
+                            user_white_side = st.selectbox("Weiß spielt auf:", ("Links", "Rechts"))
+                            white_side = user_white_side
+                            st.write(f"Weiß wurde auf der Seite '{white_side}' festgelegt.")
+                        else:
+                            white_side = user_white_side
+                else:
+                    # Verwende die bekannte white_side
                     if white_side == "Links":
                         rotated_midpoints = transformed_midpoints.copy()
                     elif white_side == "Rechts":
@@ -488,11 +494,9 @@ def main():
                     else:
                         rotated_midpoints = transformed_midpoints.copy()
 
-                    # Generiere FEN erneut
+                    # Generiere FEN
                     current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
-                    st.write(f"**Aktuelle FEN-Notation ({white_side}):** {current_fen}")
-                    game_started = True
-                    starting_position = current_fen
+                    st.write(f"**Aktuelle FEN-Notation (Weiß spielt '{white_side}'):** {current_fen}")
 
                 # Speichere das aktuelle Frame (optional)
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
