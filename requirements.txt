@@ -17,3 +17,5 @@ requests
 python-chess
 Pillow
 opencv-python-headless
+opencv-contrib-python
+opencv-python

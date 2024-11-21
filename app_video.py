@@ -10,6 +10,13 @@ import tempfile
 from PIL import Image
 import time
 import datetime
+from urllib.parse import urlparse
+
+# Hilfsfunktion zum Extrahieren der Dateierweiterung
+def get_file_extension(url):
+    parsed = urlparse(url)
+    root, ext = os.path.splitext(parsed.path)
+    return ext if ext else '.mp4'  # Standardmäßig '.mp4' verwenden, falls keine Erweiterung vorhanden ist
 
 # Holen des aktuellen Skriptverzeichnisses
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -339,7 +346,7 @@ def save_game_to_pgn(moves, starting_fen):
     return pgn_string
 
 def main():
-    st.title("Schachspiel Analyse aus Video1")
+    st.title("Schachspiel Analyse aus Video online")
 
     # Video-URL eingeben
     video_url = st.text_input("Geben Sie die URL des Videos ein:")
@@ -351,8 +358,11 @@ def main():
             response.raise_for_status()
             total_size = int(response.headers.get('content-length', 0))
 
-            # Temporäre Datei erstellen
-            tfile = tempfile.NamedTemporaryFile(delete=False)
+            # Dateierweiterung extrahieren
+            ext = get_file_extension(video_url)
+
+            # Temporäre Datei mit der richtigen Erweiterung erstellen
+            tfile = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
 
             # Fortschrittsanzeige
             progress_bar = st.progress(0)
@@ -369,7 +379,16 @@ def main():
 
             st.success("Video erfolgreich heruntergeladen!")
 
+            # Überprüfen, ob FFmpeg installiert ist
+            if not cv2.getBuildInformation().find('FFMPEG'):
+                st.warning("FFmpeg ist in Ihrer OpenCV-Installation nicht aktiviert. Dies kann zu Problemen beim Lesen von Videos führen.")
+
             cap = cv2.VideoCapture(tfile.name)
+
+            # Überprüfen, ob das Video erfolgreich geöffnet wurde
+            if not cap.isOpened():
+                st.error("Fehler beim Öffnen des Videos. Stellen Sie sicher, dass das Videoformat unterstützt wird.")
+                return
 
             # Framerate des Videos erhalten
             fps = cap.get(cv2.CAP_PROP_FPS)
@@ -389,7 +408,7 @@ def main():
             # Einmalige Schachbrett-Erkennung
             ret, frame = cap.read()
             if not ret:
-                st.error("Fehler beim Lesen des Videos.")
+                st.error("Fehler beim Lesen des Videos. Stellen Sie sicher, dass das Videoformat unterstützt wird.")
                 return
 
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
