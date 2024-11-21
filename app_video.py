@@ -11,6 +11,7 @@ from PIL import Image
 import time
 import datetime
 from urllib.parse import urlparse
+import imageio  # Neu hinzugefügt
 
 # Hilfsfunktion zum Extrahieren der Dateierweiterung
 def get_file_extension(url):
@@ -346,7 +347,7 @@ def save_game_to_pgn(moves, starting_fen):
     return pgn_string
 
 def main():
-    st.title("Schachspiel Analyse aus Video online")
+    st.title("Schachspiel Analyse aus Video")
 
     # Video-URL eingeben
     video_url = st.text_input("Geben Sie die URL des Videos ein:")
@@ -379,20 +380,8 @@ def main():
 
             st.success("Video erfolgreich heruntergeladen!")
 
-            # Überprüfen, ob FFmpeg installiert ist
-            if not cv2.getBuildInformation().find('FFMPEG'):
-                st.warning("FFmpeg ist in Ihrer OpenCV-Installation nicht aktiviert. Dies kann zu Problemen beim Lesen von Videos führen.")
-
-            cap = cv2.VideoCapture(tfile.name)
-
-            # Überprüfen, ob das Video erfolgreich geöffnet wurde
-            if not cap.isOpened():
-                st.error("Fehler beim Öffnen des Videos. Stellen Sie sicher, dass das Videoformat unterstützt wird.")
-                return
-
-            # Framerate des Videos erhalten
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            frame_interval = int(fps) if fps > 0 else 25  # Standardmäßig 25, falls fps nicht ermittelt werden kann
+            # Video mit imageio öffnen
+            video_reader = imageio.get_reader(tfile.name)
 
             # Variablen initialisieren
             previous_player_turn = None
@@ -405,10 +394,15 @@ def main():
             game_over = False
             frame_count = 0
 
+            # Framerate des Videos erhalten
+            fps = video_reader.get_meta_data().get('fps', 25)
+            frame_interval = int(fps)  # Analysiere jede Sekunde
+
             # Einmalige Schachbrett-Erkennung
-            ret, frame = cap.read()
-            if not ret:
-                st.error("Fehler beim Lesen des Videos. Stellen Sie sicher, dass das Videoformat unterstützt wird.")
+            try:
+                frame = video_reader.get_data(0)
+            except IndexError:
+                st.error("Fehler beim Lesen des Videos. Das Video ist möglicherweise leer oder beschädigt.")
                 return
 
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -439,13 +433,9 @@ def main():
                 [799, 0]
             ], dtype=np.float32))
 
-            # Video zurücksetzen
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-
             # Video durchlaufen
-            while cap.isOpened() and not game_over:
-                ret, frame = cap.read()
-                if not ret:
+            for frame_number, frame in enumerate(video_reader):
+                if game_over:
                     break
 
                 frame_count += 1
@@ -565,7 +555,7 @@ def main():
                 # Kurze Pause, um die GUI nicht zu überlasten
                 time.sleep(0.1)
 
-            cap.release()
+            video_reader.close()
             st.write("Videoverarbeitung abgeschlossen.")
 
         except Exception as e:

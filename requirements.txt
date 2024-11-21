@@ -19,3 +19,4 @@ Pillow
 opencv-python-headless
 opencv-contrib-python
 opencv-python
+imageio
