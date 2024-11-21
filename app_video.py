@@ -110,8 +110,8 @@ def detect_corners(image):
         cv2.putText(image, label, (center_x + 10, center_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
 
     if len(points) != 3:
-        st.error("Nicht alle Eckpunkte (A, B, C) wurden erkannt!")
-        st.stop()
+        # Wenn nicht alle Eckpunkte erkannt wurden, gebe None zurück
+        return None, image
 
     return points, image
 
@@ -339,7 +339,7 @@ def save_game_to_pgn(moves, starting_fen):
     return pgn_string
 
 def main():
-    st.title("Schachspiel Analyse aus Video 22")
+    st.title("Schachspiel Analyse aus Video")
 
     # Video hochladen
     uploaded_file = st.file_uploader("Lade ein Video des Schachspiels hoch", type=["mp4", "avi", "mov"])
@@ -367,23 +367,34 @@ def main():
         frame_count = 0
 
         # Einmalige Schachbrett-Erkennung
-        ret, frame = cap.read()
-        if not ret:
-            st.error("Fehler beim Lesen des Videos.")
-            return
+        corners_detected = False
 
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        while not corners_detected:
+            ret, frame = cap.read()
+            if not ret:
+                st.error("Fehler beim Lesen des Videos oder keine weiteren Frames verfügbar.")
+                return
 
-        # Schritt 1: Erkennung der Eckpunkte
-        detected_points, corner_image = detect_corners(frame_rgb)
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        # Anzeige des Bildes mit den erkannten Eckpunkten
-        st.image(corner_image, caption='Erkannte Eckpunkte', use_column_width=True)
+            # Schritt 1: Erkennung der Eckpunkte
+            detected_points, corner_image = detect_corners(frame_rgb)
+
+            if detected_points is None:
+                # Keine Ecken erkannt
+                st.image(corner_image, caption='Eckpunkte nicht erkannt, nächstes Frame wird analysiert.', use_column_width=True)
+                continue  # Nächstes Frame lesen
+            else:
+                # Ecken erkannt
+                corners_detected = True
+                # Anzeige des Bildes mit den erkannten Eckpunkten
+                st.image(corner_image, caption='Erkannte Eckpunkte', use_column_width=True)
+                # Speichere die erkannten Punkte
+                A = detected_points["A"]
+                B = detected_points["B"]
+                C = detected_points["C"]
 
         # Schritt 2: Berechnung der Ecke D und Perspektivtransformation
-        A = detected_points["A"]
-        B = detected_points["B"]
-        C = detected_points["C"]
         D_calculated = calculate_point_D(A, B, C)
 
         # Anpassung des Punktes D mit dem festen Korrekturvektor
