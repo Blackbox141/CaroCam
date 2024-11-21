@@ -282,7 +282,7 @@ def analyze_fen_with_stockfish(fen, depth=15):
 
                 return best_move  # Rückgabe des besten Zugs
             else:
-                st.error("Fehler in der API-Antwort:", data.get("error", "Unbekannter Fehler"))
+                st.error(f"Fehler in der API-Antwort: {data.get('error', 'Unbekannter Fehler')}")
         else:
             st.error(f"Fehler bei der Kommunikation mit der Stockfish API. Status code: {response.status_code}")
             st.error(f"Antwort: {response.text}")
@@ -339,122 +339,175 @@ def save_game_to_pgn(moves, starting_fen):
     return pgn_string
 
 def main():
-    st.title("Schachspiel Analyse aus Video")
+    st.title("Schachspiel Analyse aus Video1")
 
-    # Video hochladen
-    uploaded_file = st.file_uploader("Lade ein Video des Schachspiels hoch", type=["mp4", "avi", "mov"])
+    # Video-URL eingeben
+    video_url = st.text_input("Geben Sie die URL des Videos ein:")
 
-    if uploaded_file is not None:
-        # Temporäre Datei erstellen
-        tfile = tempfile.NamedTemporaryFile(delete=False)
-        tfile.write(uploaded_file.read())
+    if video_url:
+        try:
+            # Video von der URL herunterladen
+            response = requests.get(video_url, stream=True)
+            response.raise_for_status()
+            total_size = int(response.headers.get('content-length', 0))
 
-        cap = cv2.VideoCapture(tfile.name)
+            # Temporäre Datei erstellen
+            tfile = tempfile.NamedTemporaryFile(delete=False)
 
-        # Framerate des Videos erhalten
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_interval = int(fps) if fps > 0 else 25  # Standardmäßig 25, falls fps nicht ermittelt werden kann
+            # Fortschrittsanzeige
+            progress_bar = st.progress(0)
+            downloaded_size = 0
 
-        # Variablen initialisieren
-        previous_player_turn = None
-        previous_fen = None
-        move_list = []
-        game_started = False
-        starting_position = None
-        white_side = None
-        user_white_side = None  # Variable, um zu speichern, ob der Benutzer die Seite gewählt hat
-        game_over = False
-        frame_count = 0
+            for data in response.iter_content(chunk_size=1024*1024):  # 1 MB Chunks
+                tfile.write(data)
+                downloaded_size += len(data)
+                if total_size > 0:
+                    progress = int(downloaded_size / total_size * 100)
+                    progress_bar.progress(min(progress, 100))
 
-        # Einmalige Schachbrett-Erkennung
-        ret, frame = cap.read()
-        if not ret:
-            st.error("Fehler beim Lesen des Videos.")
-            return
+            tfile.close()
 
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            st.success("Video erfolgreich heruntergeladen!")
 
-        # Schritt 1: Erkennung der Eckpunkte
-        detected_points, corner_image = detect_corners(frame_rgb)
+            cap = cv2.VideoCapture(tfile.name)
 
-        # Anzeige des Bildes mit den erkannten Eckpunkten
-        st.image(corner_image, caption='Erkannte Eckpunkte', use_column_width=True)
+            # Framerate des Videos erhalten
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_interval = int(fps) if fps > 0 else 25  # Standardmäßig 25, falls fps nicht ermittelt werden kann
 
-        # Schritt 2: Berechnung der Ecke D und Perspektivtransformation
-        A = detected_points["A"]
-        B = detected_points["B"]
-        C = detected_points["C"]
-        D_calculated = calculate_point_D(A, B, C)
+            # Variablen initialisieren
+            previous_player_turn = None
+            previous_fen = None
+            move_list = []
+            game_started = False
+            starting_position = None
+            white_side = None
+            user_white_side = None  # Variable, um zu speichern, ob der Benutzer die Seite gewählt hat
+            game_over = False
+            frame_count = 0
 
-        # Anpassung des Punktes D mit dem festen Korrekturvektor
-        D_corrected = adjust_point_D(A, B, C, D_calculated, PERCENT_AB, PERCENT_BC)
-
-        # Sortiere die Punkte
-        sorted_points = sort_points(A, B, C, D_corrected.astype(int))
-
-        # Perspektivtransformation berechnen
-        M = cv2.getPerspectiveTransform(sorted_points, np.array([
-            [0, 0],
-            [0, 799],
-            [799, 799],
-            [799, 0]
-        ], dtype=np.float32))
-
-        # Video zurücksetzen
-        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-
-        # Video durchlaufen
-        while cap.isOpened() and not game_over:
+            # Einmalige Schachbrett-Erkennung
             ret, frame = cap.read()
             if not ret:
-                break
+                st.error("Fehler beim Lesen des Videos.")
+                return
 
-            frame_count += 1
-
-            # Analysiere nur jede Sekunde
-            if frame_count % frame_interval != 0:
-                continue  # Überspringe dieses Frame
-
-            # Konvertiere das Frame in RGB
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-            # Kopie des Frames für die Anzeige
-            display_frame = frame_rgb.copy()
+            # Schritt 1: Erkennung der Eckpunkte
+            detected_points, corner_image = detect_corners(frame_rgb)
 
-            # Schritt 1: Erkennung der Schachuhr
-            player_turn, clock_image = detect_player_turn(display_frame)
+            # Anzeige des Bildes mit den erkannten Eckpunkten
+            st.image(corner_image, caption='Erkannte Eckpunkte', use_column_width=True)
 
-            # Anzeige des Bildes mit der Schachuhr
-            st.image(clock_image, caption=f'Analysiertes Frame {frame_count} - Schachuhr', use_column_width=True)
+            # Schritt 2: Berechnung der Ecke D und Perspektivtransformation
+            A = detected_points["A"]
+            B = detected_points["B"]
+            C = detected_points["C"]
+            D_calculated = calculate_point_D(A, B, C)
 
-            # Überprüfe, ob es einen Wechsel bei der Uhr gegeben hat
-            if previous_player_turn != player_turn and player_turn != 'hold':
-                # Uhrwechsel erkannt, Schachbrett analysieren
+            # Anpassung des Punktes D mit dem festen Korrekturvektor
+            D_corrected = adjust_point_D(A, B, C, D_calculated, PERCENT_AB, PERCENT_BC)
 
-                # Schritt 2: Erkennung der Figuren
-                piece_midpoints, piece_labels, piece_image = detect_pieces(display_frame)
+            # Sortiere die Punkte
+            sorted_points = sort_points(A, B, C, D_corrected.astype(int))
 
-                # Anzeige des Bildes mit den erkannten Figuren
-                st.image(piece_image, caption=f'Analysiertes Frame {frame_count} - Figuren', use_column_width=True)
+            # Perspektivtransformation berechnen
+            M = cv2.getPerspectiveTransform(sorted_points, np.array([
+                [0, 0],
+                [0, 799],
+                [799, 799],
+                [799, 0]
+            ], dtype=np.float32))
 
-                # Transformiere die Figurenkoordinaten
-                ones = np.ones((piece_midpoints.shape[0], 1))
-                piece_midpoints_homogeneous = np.hstack([piece_midpoints, ones])
-                transformed_midpoints = M @ piece_midpoints_homogeneous.T
-                transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
-                transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
+            # Video zurücksetzen
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
-                # Wenn white_side noch nicht bekannt ist, versuche es zu bestimmen
-                if white_side is None:
-                    # Jetzt versuchen wir beide Rotationen
-                    fen_found = False
+            # Video durchlaufen
+            while cap.isOpened() and not game_over:
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-                    for side in ["Links", "Rechts"]:
-                        if side == "Links":
-                            # Weiß spielt links, keine Rotation
+                frame_count += 1
+
+                # Analysiere nur jede Sekunde
+                if frame_count % frame_interval != 0:
+                    continue  # Überspringe dieses Frame
+
+                # Konvertiere das Frame in RGB
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                # Kopie des Frames für die Anzeige
+                display_frame = frame_rgb.copy()
+
+                # Schritt 1: Erkennung der Schachuhr
+                player_turn, clock_image = detect_player_turn(display_frame)
+
+                # Anzeige des Bildes mit der Schachuhr
+                st.image(clock_image, caption=f'Analysiertes Frame {frame_count} - Schachuhr', use_column_width=True)
+
+                # Überprüfe, ob es einen Wechsel bei der Uhr gegeben hat
+                if previous_player_turn != player_turn and player_turn != 'hold':
+                    # Uhrwechsel erkannt, Schachbrett analysieren
+
+                    # Schritt 2: Erkennung der Figuren
+                    piece_midpoints, piece_labels, piece_image = detect_pieces(display_frame)
+
+                    # Anzeige des Bildes mit den erkannten Figuren
+                    st.image(piece_image, caption=f'Analysiertes Frame {frame_count} - Figuren', use_column_width=True)
+
+                    # Transformiere die Figurenkoordinaten
+                    ones = np.ones((piece_midpoints.shape[0], 1))
+                    piece_midpoints_homogeneous = np.hstack([piece_midpoints, ones])
+                    transformed_midpoints = M @ piece_midpoints_homogeneous.T
+                    transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
+                    transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
+
+                    # Wenn white_side noch nicht bekannt ist, versuche es zu bestimmen
+                    if white_side is None:
+                        # Jetzt versuchen wir beide Rotationen
+                        fen_found = False
+
+                        for side in ["Links", "Rechts"]:
+                            if side == "Links":
+                                # Weiß spielt links, keine Rotation
+                                rotated_midpoints = transformed_midpoints.copy()
+                            elif side == "Rechts":
+                                # Weiß spielt rechts, Brett um 180 Grad drehen
+                                rotated_midpoints = np.zeros_like(transformed_midpoints)
+                                rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 0]
+                                rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 1]
+                            else:
+                                rotated_midpoints = transformed_midpoints.copy()
+
+                            # Generiere FEN
+                            current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
+                            st.write(f"**Aktuelle FEN-Notation ({side}):** {current_fen}")
+
+                            # Prüfe, ob es die Grundstellung ist
+                            if current_fen.startswith(STARTING_FEN):
+                                game_started = True
+                                starting_position = current_fen
+                                white_side = side
+                                fen_found = True
+                                st.write(f"Weiß wurde auf der Seite '{white_side}' erkannt.")
+                                break
+
+                        if not fen_found:
+                            # Fordere Benutzereingabe
+                            if user_white_side is None:
+                                st.write("Bitte wählen Sie, auf welcher Seite Weiß spielt:")
+                                user_white_side = st.selectbox("Weiß spielt auf:", ("Links", "Rechts"))
+                                white_side = user_white_side
+                                st.write(f"Weiß wurde auf der Seite '{white_side}' festgelegt.")
+                            else:
+                                white_side = user_white_side
+                    else:
+                        # Verwende die bekannte white_side
+                        if white_side == "Links":
                             rotated_midpoints = transformed_midpoints.copy()
-                        elif side == "Rechts":
-                            # Weiß spielt rechts, Brett um 180 Grad drehen
+                        elif white_side == "Rechts":
                             rotated_midpoints = np.zeros_like(transformed_midpoints)
                             rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 0]
                             rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 1]
@@ -463,74 +516,44 @@ def main():
 
                         # Generiere FEN
                         current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
-                        st.write(f"**Aktuelle FEN-Notation ({side}):** {current_fen}")
+                        st.write(f"**Aktuelle FEN-Notation (Weiß spielt '{white_side}'):** {current_fen}")
 
-                        # Prüfe, ob es die Grundstellung ist
-                        if current_fen.startswith(STARTING_FEN):
-                            game_started = True
-                            starting_position = current_fen
-                            white_side = side
-                            fen_found = True
-                            st.write(f"Weiß wurde auf der Seite '{white_side}' erkannt.")
-                            break
+                    # Speichere das aktuelle Frame (optional)
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    image_path = f"schachbrett_{timestamp}.png"
+                    cv2.imwrite(image_path, cv2.cvtColor(display_frame, cv2.COLOR_RGB2BGR))
+                    st.write(f"Bild gespeichert: {image_path}")
 
-                    if not fen_found:
-                        # Fordere Benutzereingabe
-                        if user_white_side is None:
-                            st.write("Bitte wählen Sie, auf welcher Seite Weiß spielt:")
-                            user_white_side = st.selectbox("Weiß spielt auf:", ("Links", "Rechts"))
-                            white_side = user_white_side
-                            st.write(f"Weiß wurde auf der Seite '{white_side}' festgelegt.")
+                    # Prüfe auf Schachmatt
+                    board = chess.Board(current_fen)
+                    if board.is_checkmate():
+                        st.write("**Schachmatt!**")
+                        if starting_position.startswith(STARTING_FEN):
+                            # Wandle FEN in PGN um
+                            pgn_string = save_game_to_pgn(move_list, starting_position)
+                            st.write("**PGN des Spiels:**")
+                            st.code(pgn_string)
                         else:
-                            white_side = user_white_side
-                else:
-                    # Verwende die bekannte white_side
-                    if white_side == "Links":
-                        rotated_midpoints = transformed_midpoints.copy()
-                    elif white_side == "Rechts":
-                        rotated_midpoints = np.zeros_like(transformed_midpoints)
-                        rotated_midpoints[:, 0] = 800 - transformed_midpoints[:, 0]
-                        rotated_midpoints[:, 1] = 800 - transformed_midpoints[:, 1]
-                    else:
-                        rotated_midpoints = transformed_midpoints.copy()
+                            # Gehe zu Schritt 5
+                            st.write("Das Spiel hat nicht von der Grundstellung begonnen.")
+                            st.write("Glückwunsch zum Spielende!")
+                        # Spiel sichern
+                        game_over = True
 
-                    # Generiere FEN
-                    current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
-                    st.write(f"**Aktuelle FEN-Notation (Weiß spielt '{white_side}'):** {current_fen}")
+                    # Aktualisiere den vorherigen Spieler
+                    previous_player_turn = player_turn
 
-                # Speichere das aktuelle Frame (optional)
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                image_path = f"schachbrett_{timestamp}.png"
-                cv2.imwrite(image_path, cv2.cvtColor(display_frame, cv2.COLOR_RGB2BGR))
-                st.write(f"Bild gespeichert: {image_path}")
+                # Kurze Pause, um die GUI nicht zu überlasten
+                time.sleep(0.1)
 
-                # Prüfe auf Schachmatt
-                board = chess.Board(current_fen)
-                if board.is_checkmate():
-                    st.write("**Schachmatt!**")
-                    if starting_position.startswith(STARTING_FEN):
-                        # Wandle FEN in PGN um
-                        pgn_string = save_game_to_pgn(move_list, starting_position)
-                        st.write("**PGN des Spiels:**")
-                        st.code(pgn_string)
-                    else:
-                        # Gehe zu Schritt 5
-                        st.write("Das Spiel hat nicht von der Grundstellung begonnen.")
-                        st.write("Glückwunsch zum Spielende!")
-                    # Spiel sichern
-                    game_over = True
+            cap.release()
+            st.write("Videoverarbeitung abgeschlossen.")
 
-                # Aktualisiere den vorherigen Spieler
-                previous_player_turn = player_turn
-
-            # Kurze Pause, um die GUI nicht zu überlasten
-            time.sleep(0.1)
-
-        cap.release()
-        st.write("Videoverarbeitung abgeschlossen.")
+        except Exception as e:
+            st.error(f"Fehler beim Herunterladen oder Verarbeiten des Videos: {e}")
 
     else:
-        st.write("Bitte lade ein Video des Schachspiels hoch.")
+        st.write("Bitte geben Sie die URL eines Videos ein.")
 
 if __name__ == "__main__":
     main()

@@ -16,3 +16,4 @@ ultralytics
 requests
 python-chess
 Pillow
+opencv-python-headless
