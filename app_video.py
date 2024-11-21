@@ -275,7 +275,7 @@ def save_game_to_pgn(moves, starting_fen):
     return pgn_string
 
 def main():
-    st.title("Schachspiel Analyse aus Video mit Fortschrittsanzeige")
+    st.title("Schachspiel Analyse aus Video mit Fortschrittsanzeige l+r")
 
     # Video hochladen
     uploaded_file = st.file_uploader("Lade ein Video des Schachspiels hoch", type=["mp4", "avi", "mov"])
@@ -312,6 +312,8 @@ def main():
         user_white_side = None  # Variable, um zu speichern, ob der Benutzer die Seite gewählt hat
         game_over = False
         frame_count = 0
+
+        current_player = 'w'  # Startspieler Weiß
 
         # Einmalige Schachbrett-Erkennung
         corners_detected = False
@@ -400,6 +402,20 @@ def main():
                 if previous_player_turn_stable != player_turn:
                     st.write(f"Stabiler Uhrwechsel erkannt: {previous_player_turn_stable} -> {player_turn}")
 
+                    # Bestimme den Spieler am Zug basierend auf dem Uhrwechsel
+                    if previous_player_turn_stable == 'left' and player_turn == 'right':
+                        # Spieler auf der linken Seite hat einen Zug gemacht
+                        current_player = 'b'  # Jetzt ist Schwarz am Zug
+                    elif previous_player_turn_stable == 'right' and player_turn == 'left':
+                        # Spieler auf der rechten Seite hat einen Zug gemacht
+                        current_player = 'w'  # Jetzt ist Weiß am Zug
+                    # Initialisierung
+                    elif previous_player_turn_stable is None:
+                        if player_turn == 'left':
+                            current_player = 'w'
+                        elif player_turn == 'right':
+                            current_player = 'b'
+
                     # Speichere den neuen stabilen Spielerzug
                     previous_player_turn_stable = player_turn
 
@@ -441,7 +457,7 @@ def main():
                                 rotated_midpoints = transformed_midpoints.copy()
 
                             # Generiere FEN
-                            current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
+                            current_fen = generate_fen_from_board(rotated_midpoints, piece_labels, player_to_move=current_player)
                             st.write(f"**Aktuelle FEN-Notation ({side}):** {current_fen}")
 
                             # Prüfe, ob es die Grundstellung ist
@@ -473,8 +489,8 @@ def main():
                         else:
                             rotated_midpoints = transformed_midpoints.copy()
 
-                        # Generiere FEN
-                        current_fen = generate_fen_from_board(rotated_midpoints, piece_labels)
+                        # Generiere FEN mit aktuellem Spieler am Zug
+                        current_fen = generate_fen_from_board(rotated_midpoints, piece_labels, player_to_move=current_player)
                         st.write(f"**Aktuelle FEN-Notation (Weiß spielt '{white_side}'):** {current_fen}")
 
                     # Speichere das aktuelle Frame (optional)
@@ -487,7 +503,7 @@ def main():
                     if previous_fen is not None and current_fen != previous_fen:
                         st.write("Zug erkannt aufgrund von FEN-Änderung.")
 
-                        # Optional: Versuche, den genauen Zug zu ermitteln
+                        # Versuche, den genauen Zug zu ermitteln
                         move = get_move_between_positions(previous_fen, current_fen)
                         if move is not None:
                             move_list.append(move.uci())
@@ -501,6 +517,9 @@ def main():
                             fen_list.append(current_fen)
                         # Aktualisiere den vorherigen FEN
                         previous_fen = current_fen
+
+                        # **Spieler am Zug wird nicht mehr gewechselt, da er durch die Uhr bestimmt wird**
+
                     else:
                         if previous_fen is None:
                             # Setze die Startposition
