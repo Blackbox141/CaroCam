@@ -80,7 +80,8 @@ def detect_pieces(image):
         # Zeichne die Bounding Box und das Label mit Confidence Score auf das Bild
         cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
         text = f"{label}: {conf:.1f}%"
-        cv2.putText(image, text, (int(x1), int(y1)-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
+        # Erhöhen der Schriftgröße
+        cv2.putText(image, text, (int(x1), int(y1)-10), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2, cv2.LINE_AA)
 
     return np.array(midpoints), labels, image
 
@@ -107,7 +108,8 @@ def detect_corners(image):
         # Zeichne die Eckpunkte auf das Bild
         label = class_names[cls_id]
         cv2.circle(image, (center_x, center_y), 5, (0, 0, 255), -1)
-        cv2.putText(image, label, (center_x + 10, center_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
+        # Erhöhen der Schriftgröße
+        cv2.putText(image, label, (center_x + 10, center_y), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2, cv2.LINE_AA)
 
     if len(points) != 3:
         # Wenn nicht alle Eckpunkte erkannt wurden, gebe None zurück
@@ -132,7 +134,8 @@ def detect_player_turn(image):
 
         # Zeichne die Bounding Box und das Label auf das Bild
         cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (255, 255, 0), 2)
-        cv2.putText(image, label, (int(x1), int(y1)-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
+        # Erhöhen der Schriftgröße
+        cv2.putText(image, label, (int(x1), int(y1)-10), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2, cv2.LINE_AA)
 
     # Bestimme anhand der Labels, wer am Zug ist
     if 'left' in labels:
@@ -272,7 +275,7 @@ def save_game_to_pgn(moves, starting_fen):
     return pgn_string
 
 def main():
-    st.title("Schachspiel Analyse aus Video pgn 2")
+    st.title("Schachspiel Analyse aus Video mit Fortschrittsanzeige")
 
     # Video hochladen
     uploaded_file = st.file_uploader("Lade ein Video des Schachspiels hoch", type=["mp4", "avi", "mov"])
@@ -290,6 +293,11 @@ def main():
         # Wenn frame_interval = 1, wird jedes Frame analysiert
         # Wenn frame_interval = fps, wird etwa jede Sekunde ein Frame analysiert
         # Sie können den Wert entsprechend anpassen
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))  # Gesamtanzahl der Frames
+
+        # Fortschrittsbalken initialisieren
+        progress_bar = st.progress(0)
 
         # Variablen initialisieren
         previous_player_turn = None
@@ -360,6 +368,10 @@ def main():
                 break
 
             frame_count += 1
+
+            # Fortschrittsbalken aktualisieren
+            progress = frame_count / total_frames
+            progress_bar.progress(min(progress, 1.0))
 
             # Überspringen von Frames basierend auf frame_interval
             if frame_count % frame_interval != 0:
@@ -471,18 +483,18 @@ def main():
                     cv2.imwrite(image_path, cv2.cvtColor(display_frame, cv2.COLOR_RGB2BGR))
                     st.write(f"Bild gespeichert: {image_path}")
 
-                    # Versuche den Zug zu ermitteln
+                    # Wenn die aktuelle FEN sich von der vorherigen unterscheidet, ist ein Zug erfolgt
                     if previous_fen is not None and current_fen != previous_fen:
+                        st.write("Zug erkannt aufgrund von FEN-Änderung.")
+
+                        # Optional: Versuche, den genauen Zug zu ermitteln
                         move = get_move_between_positions(previous_fen, current_fen)
                         if move is not None:
                             move_list.append(move.uci())
                             st.write(f"Erkannter Zug: {move.uci()}")
                         else:
-                            st.write("Kein gültiger Zug zwischen den Positionen gefunden.")
-                            # Sie können hier entscheiden, wie Sie verfahren möchten
-                            # In diesem Fall wird der Zug trotzdem gespeichert
-                            # move_list.append("Unbekannter Zug")
-                            pass
+                            st.write("Genauer Zug konnte nicht ermittelt werden.")
+                            move_list.append("Unbekannter Zug")
 
                         # Füge die aktuelle FEN hinzu, wenn sie nicht identisch zur letzten gespeicherten FEN ist
                         if len(fen_list) == 0 or current_fen != fen_list[-1]:
@@ -496,8 +508,7 @@ def main():
                             fen_list.append(current_fen)
                             previous_fen = current_fen
                         else:
-                            # Keine Änderung in FEN oder kein Zug erkannt
-                            pass
+                            st.write("Keine Änderung in der Stellung erkannt.")
 
                     # Prüfe auf Schachmatt
                     board = chess.Board(current_fen)
