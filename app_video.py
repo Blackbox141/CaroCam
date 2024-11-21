@@ -206,7 +206,7 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
     for point, label in zip(midpoints, labels):
         x, y = point
         col = int(x // step_size)
-        row = int(y // step_size)
+        row = 7 - int(y // step_size)  # Invertiere die y-Achse
 
         # Prüfe, ob die Position innerhalb der Grenzen liegt
         if 0 <= row < grid_size and 0 <= col < grid_size:
