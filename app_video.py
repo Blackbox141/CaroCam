@@ -197,16 +197,18 @@ def warp_perspective(image, src_points):
     return warped_image, M
 
 def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
-    # Erstelle ein leeres Schachbrett (8x8) als Liste von Listen
+    # Erstelle ein leeres Schachbrett (8x8)
     board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
 
-    step_size = 800 // grid_size  # Größe jeder Zelle (entspricht der Größe des entzerrten Bildes)
+    step_size = 800 // grid_size  # Größe jeder Zelle
 
     # Fülle das Board mit den Figuren basierend auf den erkannten Mittelpunkten
     for point, label in zip(midpoints, labels):
         x, y = point
-        col = int(x // step_size)
-        row = 7 - int(y // step_size)  # Invertiere die y-Achse
+
+        # Tausche x und y und invertiere die x-Achse
+        col = int(y // step_size)
+        row = 7 - int(x // step_size)
 
         # Prüfe, ob die Position innerhalb der Grenzen liegt
         if 0 <= row < grid_size and 0 <= col < grid_size:
@@ -337,7 +339,7 @@ def save_game_to_pgn(moves, starting_fen):
     return pgn_string
 
 def main():
-    st.title("Schachspiel Analyse aus Video1")
+    st.title("Schachspiel Analyse aus Video P")
 
     # Video hochladen
     uploaded_file = st.file_uploader("Lade ein Video des Schachspiels hoch", type=["mp4", "avi", "mov"])
