@@ -286,7 +286,10 @@ def main():
 
         # Framerate des Videos erhalten
         fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_interval = int(fps) if fps > 0 else 25  # Standardmäßig 25, falls fps nicht ermittelt werden kann
+        frame_interval = 1  # Hier können Sie den Abstand zwischen den ausgewerteten Frames einstellen
+        # Wenn frame_interval = 1, wird jedes Frame analysiert
+        # Wenn frame_interval = fps, wird etwa jede Sekunde ein Frame analysiert
+        # Sie können den Wert entsprechend anpassen
 
         # Variablen initialisieren
         previous_player_turn = None
@@ -358,6 +361,10 @@ def main():
 
             frame_count += 1
 
+            # Überspringen von Frames basierend auf frame_interval
+            if frame_count % frame_interval != 0:
+                continue  # Überspringe dieses Frame
+
             # Konvertiere das Frame in RGB
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -367,7 +374,7 @@ def main():
             # Schritt 1: Erkennung der Schachuhr
             player_turn, clock_image = detect_player_turn(display_frame)
 
-            # Prüfe, ob der Spielerzug stabil ist (gleicher Wert in zwei aufeinanderfolgenden Frames)
+            # Prüfe, ob der Spielerzug stabil ist (gleicher Wert in fünf aufeinanderfolgenden Frames)
             if player_turn == previous_player_turn:
                 stable_player_turn_count += 1
             else:
@@ -375,8 +382,8 @@ def main():
 
             previous_player_turn = player_turn
 
-            # Wenn der Spielerzug stabil ist (mindestens 2 aufeinanderfolgende Frames gleich)
-            if stable_player_turn_count >= 2 and player_turn != 'hold' and player_turn is not None:
+            # Wenn der Spielerzug stabil ist (mindestens 5 aufeinanderfolgende Frames gleich)
+            if stable_player_turn_count >= 5 and player_turn != 'hold' and player_turn is not None:
                 # Prüfe, ob sich der stabile Spielerzug geändert hat
                 if previous_player_turn_stable != player_turn:
                     st.write(f"Stabiler Uhrwechsel erkannt: {previous_player_turn_stable} -> {player_turn}")
@@ -470,12 +477,18 @@ def main():
                         if move is not None:
                             move_list.append(move.uci())
                             st.write(f"Erkannter Zug: {move.uci()}")
-                            fen_list.append(current_fen)
-                            # Aktualisiere den vorherigen FEN
-                            previous_fen = current_fen
                         else:
                             st.write("Kein gültiger Zug zwischen den Positionen gefunden.")
-                            # previous_fen bleibt unverändert
+                            # Sie können hier entscheiden, wie Sie verfahren möchten
+                            # In diesem Fall wird der Zug trotzdem gespeichert
+                            # move_list.append("Unbekannter Zug")
+                            pass
+
+                        # Füge die aktuelle FEN hinzu, wenn sie nicht identisch zur letzten gespeicherten FEN ist
+                        if len(fen_list) == 0 or current_fen != fen_list[-1]:
+                            fen_list.append(current_fen)
+                        # Aktualisiere den vorherigen FEN
+                        previous_fen = current_fen
                     else:
                         if previous_fen is None:
                             # Setze die Startposition
