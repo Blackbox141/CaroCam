@@ -11,14 +11,14 @@ import webbrowser
 import tempfile
 import io
 
-# Holen des aktuellen Skriptverzeichnisses
+# Holen des aktuellen Skriptverzeichnisses - Testbild C:/Test_Images_Yolo/IMG_zug1.jpeg
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Relativer Pfad zum Modell zur Erkennung der Schachfiguren
-piece_model_path = os.path.join(BASE_DIR, 'Figure Detection', 'runs', 'detect', 'yolov8-chess28', 'weights', 'best.pt')
+piece_model_path = os.path.join(BASE_DIR, 'Figure Detection 2', 'runs', 'detect', 'yolov8-chess31', 'weights', 'best.pt')
 
 # Relativer Pfad zum Modell zur Erkennung der Eckpunkte
-corner_model_path = os.path.join(BASE_DIR, 'Corner Detection', 'runs', 'detect', 'yolov8n_corner12', 'weights', 'best.pt')
+corner_model_path = os.path.join(BASE_DIR, 'Corner Detection 2', 'runs', 'detect', 'yolov8n_corner14', 'weights', 'best.pt')
 
 # Laden der YOLO-Modelle mit den relativen Pfaden
 if os.path.exists(piece_model_path) and os.path.exists(corner_model_path):

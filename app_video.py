@@ -15,14 +15,14 @@ import datetime
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Relativer Pfad zum Modell zur Erkennung der Schachfiguren
-# piece_model_path = os.path.join(BASE_DIR, 'Figure Detection', 'runs', 'detect', 'yolov8-chess28', 'weights', 'best.pt')
-piece_model_path = os.path.join(BASE_DIR, 'best_figure.py')
+piece_model_path = os.path.join(BASE_DIR, 'Figure Detection 2', 'runs', 'detect', 'yolov8-chess31', 'weights', 'best.pt')
+
 # Relativer Pfad zum Modell zur Erkennung der Eckpunkte
-#corner_model_path = os.path.join(BASE_DIR, 'Corner Detection', 'runs', 'detect', 'yolov8n_corner12', 'weights', 'best.pt')
-corner_model_path = os.path.join(BASE_DIR, 'best_corner.py')
+corner_model_path = os.path.join(BASE_DIR, 'Corner Detection 2', 'runs', 'detect', 'yolov8n_corner14', 'weights', 'best.pt')
+
 # Relativer Pfad zum Modell zur Erkennung des Spielers am Zug (Schachuhr)
-#clock_model_path = os.path.join(BASE_DIR, 'Clock Detection 1', 'runs', 'detect', 'yolov8-chess3', 'weights', 'best.pt')
-clock_model_path = os.path.join(BASE_DIR, 'best_clock.py')
+clock_model_path = os.path.join(BASE_DIR, 'Clock Detection 2', 'runs', 'detect', 'yolov8-chess5', 'weights', 'best.pt')
+
 # Laden der YOLO-Modelle mit den relativen Pfaden
 if os.path.exists(piece_model_path) and os.path.exists(corner_model_path) and os.path.exists(clock_model_path):
     piece_model = YOLO(piece_model_path)
