@@ -21,7 +21,7 @@ piece_model_path = os.path.join(BASE_DIR, 'Figure Detection 2', 'runs', 'detect'
 corner_model_path = os.path.join(BASE_DIR, 'Corner Detection 2', 'runs', 'detect', 'yolov8n_corner14', 'weights', 'best.pt')
 
 # Relativer Pfad zum Modell zur Erkennung des Spielers am Zug (Schachuhr)
-clock_model_path = os.path.join(BASE_DIR, 'Clock Detection 2', 'runs', 'detect', 'yolov8-chess5', 'weights', 'best.pt')
+clock_model_path = os.path.join(BASE_DIR, 'Clock Detection 3', 'runs', 'detect', 'yolov8-chess5', 'weights', 'best.pt')
 
 # Laden der YOLO-Modelle mit den relativen Pfaden
 if os.path.exists(piece_model_path) and os.path.exists(corner_model_path) and os.path.exists(clock_model_path):
