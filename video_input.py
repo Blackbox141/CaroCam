@@ -1,33 +1,37 @@
 import numpy as np
 import cv2
-from matplotlib import pyplot as plt
 from ultralytics import YOLO
 import os
-import requests
+import matplotlib.pyplot as plt
 import chess
-import chess.svg
-import tempfile
-import io
-import webbrowser
+import chess.pgn
+import logging
 
-# Holen des aktuellen Skriptverzeichnisses
+# Logging unterdrücken für ultralytics
+logging.getLogger("ultralytics").setLevel(logging.ERROR)
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Relativer Pfad zum Modell zur Erkennung der Schachfiguren
-piece_model_path = os.path.join(BASE_DIR, 'Figure Detection', 'runs', 'detect', 'yolov8-chess28', 'weights', 'best.pt')
+# An deine Pfade anpassen
+piece_model_path = os.path.join(
+    BASE_DIR, 'Figure Detection 3', 'runs', 'detect', 'yolov8-chess32', 'weights', 'best.pt'
+)
+corner_model_path = os.path.join(
+    BASE_DIR, 'Corner Detection 2', 'runs', 'detect', 'yolov8n_corner14', 'weights', 'best.pt'
+)
+clock_model_path = os.path.join(
+    BASE_DIR, 'Clock Detection 3', 'runs', 'detect', 'yolov8-chess6', 'weights', 'best.pt'
+)
 
-# Relativer Pfad zum Modell zur Erkennung der Eckpunkte
-corner_model_path = os.path.join(BASE_DIR, 'Corner Detection', 'runs', 'detect', 'yolov8n_corner12', 'weights', 'best.pt')
-
-# Laden der YOLO-Modelle mit den relativen Pfaden
-if os.path.exists(piece_model_path) and os.path.exists(corner_model_path):
+if os.path.exists(piece_model_path) and os.path.exists(corner_model_path) and os.path.exists(clock_model_path):
     piece_model = YOLO(piece_model_path)
     corner_model = YOLO(corner_model_path)
+    clock_model = YOLO(clock_model_path)
 else:
-    print(f"Modelldatei nicht gefunden. Überprüfe die Pfade:\nPiece model: {piece_model_path}\nCorner model: {corner_model_path}")
+    print("Modelldatei nicht gefunden.")
     exit()
 
-# FEN-Zeichen für Figuren
+# Mapping von YOLO-Klassen zu FEN-Buchstaben
 FEN_MAPPING = {
     'Black Pawn': 'p',
     'Black Bishop': 'b',
@@ -43,370 +47,516 @@ FEN_MAPPING = {
     'White Knight': 'N'
 }
 
-# Parameter für die Korrektur (kannst du hier anpassen)
-PERCENT_AB = 0.17  # Beispielwert: 17% der Strecke AB
-PERCENT_BC = -0.07  # Beispielwert: -7% der Strecke BC
+# Standard-Aufstellung (FEN)
+STARTING_PLACEMENT = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
 
-# Funktionen
-def detect_pieces(image):
-    results = piece_model.predict(image, conf=0.1, iou=0.3, imgsz=1400)
+# Zwei Korrektur-Parameter für den vierten Eckpunkt
+PERCENT_AB = 0.17
+PERCENT_BC = -0.07
+
+
+def detect_pieces(image, min_conf=0.7):
+    """Erkennt Schachfiguren per YOLO."""
+    results = piece_model.predict(
+        image,
+        conf=0.05,  # absichtlich niedrig, damit YOLO mehr Boxen anbietet
+        iou=0.3,
+        imgsz=1400,
+        verbose=False
+    )
+    class_names = piece_model.model.names
     result = results[0]
 
     midpoints = []
     labels = []
-    boxes = result.boxes
+    confidences = []
+    for box in result.boxes:
+        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+        cls_id = int(box.cls.cpu().numpy()[0])
+        conf_val = float(box.conf.cpu().numpy()[0])
+        label = class_names[cls_id]
 
-    for box in boxes:
-        x1, y1, x2, y2 = box.xyxy.cpu().numpy()[0]
-        cls = int(box.cls.cpu().numpy()[0])
-        label = result.names[cls]
+        if conf_val < min_conf:
+            continue
 
-        # Berechnung des Mittelpunkts der unteren Hälfte der Bounding Box
+        # Mittelpunkt in x
         mid_x = x1 + (x2 - x1) / 2
-        mid_y = y1 + (y2 - y1) * 0.75  # Mitte der unteren Hälfte
+        # Mittelpunkt in y, aber etwas tiefer:
+        mid_y = y1 + (y2 - y1) * 0.75
 
         midpoints.append([mid_x, mid_y])
         labels.append(label)
+        confidences.append(conf_val)
 
-    return np.array(midpoints), labels, result
+    return np.array(midpoints), labels, confidences
+
 
 def detect_corners(image):
-    results = corner_model(image)
+    """Erkennt die 3 Eckpunkte A, B, C per YOLO."""
+    results = corner_model(
+        image,
+        conf=0.1,
+        iou=0.3,
+        imgsz=1400,
+        verbose=False
+    )
     points = {}
-
-    for result in results[0].boxes:
-        box = result.xyxy[0].cpu().numpy()  # (x1, y1, x2, y2)
-        center_x = int((box[0] + box[2]) / 2)  # Mittelpunkt der Bounding Box (x)
-        center_y = int((box[1] + box[3]) / 2)  # Mittelpunkt der Bounding Box (y)
-
-        # Klassennamen im YOLO-Modell zuordnen
-        if result.cls.item() == 0:  # A
+    for box in results[0].boxes:
+        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+        center_x = int((x1 + x2) / 2)
+        center_y = int((y1 + y2) / 2)
+        cls_id = int(box.cls.cpu().numpy()[0])
+        if cls_id == 0:
             points["A"] = np.array([center_x, center_y])
-        elif result.cls.item() == 1:  # B
+        elif cls_id == 1:
             points["B"] = np.array([center_x, center_y])
-        elif result.cls.item() == 2:  # C
+        elif cls_id == 2:
             points["C"] = np.array([center_x, center_y])
 
     if len(points) != 3:
-        print("Nicht alle Eckpunkte (A, B, C) wurden erkannt!")
-        return None, None
+        return None
+    return points
 
-    return points, results
+
+def detect_player_turn(image, visualize=False):
+    """Erkennt mit clock_model: 'left', 'right', 'hold' oder None."""
+    results = clock_model(
+        image,
+        conf=0.1,
+        iou=0.3,
+        imgsz=1400,
+        verbose=False
+    )
+    class_names = clock_model.model.names
+    boxes = results[0].boxes
+
+    labels = []
+    for box in boxes:
+        cls_id = int(box.cls.cpu().numpy()[0])
+        label = class_names[cls_id]
+        labels.append(label)
+
+    player_turn = None
+    if 'left' in labels:
+        player_turn = 'left'
+    elif 'right' in labels:
+        player_turn = 'right'
+    if 'hold' in labels:
+        player_turn = 'hold'
+
+    if visualize:
+        return player_turn, results
+    else:
+        return player_turn, None
+
 
 def calculate_point_D(A, B, C):
+    """Rechnet den vierten Eckpunkt D = A + (C - B)."""
     BC = C - B
-    D_calculated = A + BC
-    return D_calculated
+    return A + BC
 
-def adjust_point_D(A, B, C, D_calculated, percent_AB=PERCENT_AB, percent_BC=PERCENT_BC):
-    # Berechnung der Vektoren AB und BC
+
+def adjust_point_D(A, B, C, D_calculated, percent_AB, percent_BC):
+    """Korrigiert D um eine kleine Verschiebung basierend auf Vektoren AB und BC."""
     AB = B - A
     BC = C - B
-
-    # Berechnung des Korrekturvektors
     correction_vector = percent_AB * AB + percent_BC * BC
+    return D_calculated + correction_vector
 
-    # Anwenden des Korrekturvektors auf D_calculated
-    D_corrected = D_calculated + correction_vector
-
-    return D_corrected
 
 def sort_points(A, B, C, D):
-    points = np.array([A, B, C, D])
-    # Sortiere die Punkte nach der y-Koordinate (oben und unten)
-    points = sorted(points, key=lambda x: x[1])
-    # Sortiere die oberen Punkte nach der x-Koordinate
-    top_points = sorted(points[:2], key=lambda x: x[0])  # Obere Punkte (A und D)
-    # Sortiere die unteren Punkte nach der x-Koordinate
-    bottom_points = sorted(points[2:], key=lambda x: x[0])  # Untere Punkte (B und C)
-    # Weisen den sortierten Punkten die richtige Position zu
-    A_sorted, D_sorted = top_points  # A ist oben links, D ist oben rechts
-    B_sorted, C_sorted = bottom_points  # B ist unten links, C ist unten rechts
+    """Sortiert die vier Eckpunkte für OpenCVs getPerspectiveTransform."""
+    pts = np.array([A, B, C, D])
+    pts = sorted(pts, key=lambda x: x[1])
+    top_pts = sorted(pts[:2], key=lambda x: x[0])
+    bot_pts = sorted(pts[2:], key=lambda x: x[0])
+    A_sorted, D_sorted = top_pts
+    B_sorted, C_sorted = bot_pts
     return np.array([A_sorted, B_sorted, C_sorted, D_sorted], dtype=np.float32)
 
+
 def warp_perspective(image, src_points):
-    dst_size = 800  # Zielgröße 800x800 Pixel für das quadratische Schachbrett
+    """Entzerrt das Bild auf 800x800 und dreht um 180°, damit es nicht auf dem Kopf steht."""
+    dst_size = 800
     dst_points = np.array([
-        [0, 0],  # A' (oben links)
-        [0, dst_size - 1],  # B' (unten links)
-        [dst_size - 1, dst_size - 1],  # C' (unten rechts)
-        [dst_size - 1, 0]  # D' (oben rechts)
+        [0, 0],
+        [0, dst_size - 1],
+        [dst_size - 1, dst_size - 1],
+        [dst_size - 1, 0]
     ], dtype=np.float32)
 
-    # Perspektivtransformation berechnen
     M = cv2.getPerspectiveTransform(src_points, dst_points)
+    warped = cv2.warpPerspective(image, M, (dst_size, dst_size))
+    # 180°-Rotation
+    warped = cv2.rotate(warped, cv2.ROTATE_180)
+    return warped, M
 
-    # Perspektivtransformation anwenden
-    warped_image = cv2.warpPerspective(image, M, (dst_size, dst_size))
 
-    return warped_image, M
+def plot_final_board(image, midpoints, labels, confidences):
+    """
+    Zeichnet ein 8x8-Gitter auf das entzerrte Bild,
+    schreibt an die erkannte Figur-Position die FEN-Figur + Confidence.
+    """
+    if midpoints.shape[0] == 0:
+        return None
 
-def rotate_image(image):
-    return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+    grid_size = 8
+    step_size = image.shape[0] // grid_size
 
-def generate_fen_from_board(midpoints, labels, grid_size=8):
-    # Erstelle ein leeres Schachbrett (8x8) in Form einer Liste
-    board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.imshow(image, extent=[0, image.shape[1], image.shape[0], 0])
 
-    step_size = 800 // grid_size  # Größe jeder Zelle (entspricht der Größe des entzerrten Bildes)
+    # Gitterlinien
+    for i in range(grid_size + 1):
+        ax.axhline(i * step_size, color='black', linewidth=1)
+        ax.axvline(i * step_size, color='black', linewidth=1)
 
-    # Fülle das Board mit den Figuren
-    for point, label in zip(midpoints, labels):
-        x, y = point
+    # Spalten (A..H) und Reihen (1..8)
+    for i in range(grid_size):
+        ax.text(i * step_size + step_size / 2,
+                image.shape[0] - 10,
+                chr(65 + i),
+                fontsize=12, color='black',
+                ha='center', va='center')
+        ax.text(10,
+                i * step_size + step_size / 2,
+                str(grid_size - i),
+                fontsize=12, color='black',
+                ha='center', va='center')
+
+    for (x, y), lbl, conf_val in zip(midpoints, labels, confidences):
         col = int(x // step_size)
         row = int(y // step_size)
-
-        # Prüfe, ob die Position innerhalb der Grenzen liegt
         if 0 <= row < grid_size and 0 <= col < grid_size:
-            fen_char = FEN_MAPPING.get(label, '')
-            board[row][col] = fen_char
-        else:
-            # Ignoriere Figuren außerhalb des Schachbretts
-            print(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist außerhalb des Schachbretts und wird ignoriert.")
+            fen_char = FEN_MAPPING.get(lbl, '?')
+            cx = col * step_size + step_size / 2
+            cy = row * step_size + step_size / 2
+            text_str = f"{fen_char}({conf_val*100:.1f}%)"
+            ax.text(cx, cy, text_str,
+                    fontsize=14, color='red',
+                    ha='center', va='center')
 
-    # Erstelle die FEN-Notation
+    ax.set_title("Erkannte Figuren (Confidence) auf dem entzerrten Brett", fontsize=12)
+    ax.axis('off')
+    return fig
+
+
+def generate_placement_from_board(midpoints, labels, grid_size=8):
+    """
+    Wandelt (x,y)+Label in eine FEN-Zeichenkette um.
+    (x→col, y→row) mit Umkehrung row = 7 - (x//step_size)
+    """
+    board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
+    step_size = 800 // grid_size
+    for (mx, my), lbl in zip(midpoints, labels):
+        c = int(my // step_size)
+        r = 7 - int(mx // step_size)
+        if 0 <= r < grid_size and 0 <= c < grid_size:
+            fen_char = FEN_MAPPING.get(lbl, '')
+            board[r][c] = fen_char
+
     fen_rows = []
-    for row in board:
-        fen_row = ''
+    for row_data in board:
         empty_count = 0
-        for square in row:
-            if square == '':
+        fen_row = ''
+        for sq in row_data:
+            if sq == '':
                 empty_count += 1
             else:
                 if empty_count > 0:
                     fen_row += str(empty_count)
                     empty_count = 0
-                fen_row += square
+                fen_row += sq
         if empty_count > 0:
             fen_row += str(empty_count)
         fen_rows.append(fen_row)
 
-    # Verbinde alle Zeilen mit Schrägstrichen und hänge standardmäßige FEN-Informationen an
-    fen_string = '/'.join(fen_rows) + " w - - 0 1"  # "w" (Weiß am Zug), keine Rochade, keine En-passant, 0 Züge, Zug 1
+    return '/'.join(fen_rows)
 
-    return fen_string
 
-def analyze_fen_with_stockfish(fen, depth=15):
-    url = 'https://stockfish.online/api/s/v2.php'
+def fen_diff_to_move(fen1, fen2, color='w'):
+    """Prüft alle legalen Züge von fen1 aus (python-chess), ob fen2 erzeugt wird."""
+    if not fen1 or not fen2:
+        return None
 
-    # URL mit den Parametern FEN und Tiefe aufbauen
-    params = {
-        'fen': fen,
-        'depth': min(depth, 15)  # Tiefe darf nicht größer als 15 sein
-    }
-
+    full_fen1 = f"{fen1} {color} KQkq - 0 1"
     try:
-        # Sende GET-Anfrage mit den Parametern
-        response = requests.get(url, params=params)
+        board = chess.Board(full_fen1)
+    except:
+        return None
 
-        if response.status_code == 200:
-            data = response.json()  # Antwort im JSON-Format analysieren
-            print("Antwort von Stockfish API:")
-            print(data)
+    for move in board.legal_moves:
+        board.push(move)
+        fen_part = board.fen().split(" ")[0]
+        if fen_part == fen2:
+            return move
+        board.pop()
+    return None
 
-            if data.get("success"):
-                raw_best_move = data.get("bestmove", "None")
-                evaluation = data.get("evaluation", "None")
-                mate = data.get("mate", None)
 
-                # Parsen des best_move Strings
-                if raw_best_move != "None":
-                    # Beispiel für raw_best_move: 'bestmove c3b4 ponder d7d6'
-                    tokens = raw_best_move.split()
-                    if len(tokens) >= 2:
-                        best_move = tokens[1]  # Extrahiere den eigentlichen Zug
-                    else:
-                        best_move = None
-                        print("Konnte den besten Zug nicht aus der API-Antwort extrahieren.")
-                else:
-                    best_move = None
+def fix_fen_with_single_frames_on_the_fly(cap, current_frame_index, frame_interval,
+                                          M, white_side,
+                                          old_fen, color,
+                                          max_tries=10,
+                                          min_conf=0.7):
+    """
+    Versucht nacheinander in den nächsten max_tries Frames,
+    eine FEN zu finden, die old_fen in einen legalen Zug überführt.
+    Sobald eine legale FEN gefunden wird, return (True, new_fen).
+    Ansonsten (False, old_fen).
+    """
+    start_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
 
-                # Ausgabe der Ergebnisse
-                print(f"\nStockfish Bewertung:")
-                print(f"Beste Zugempfehlung: {best_move}")
-                print(f"Bewertung: {evaluation}")
+    success_fen = None
+    for _ in range(max_tries):
+        next_frame_pos = current_frame_index + frame_interval
+        cap.set(cv2.CAP_PROP_POS_FRAMES, next_frame_pos)
+        current_frame_index = next_frame_pos
 
-                if mate is not None:
-                    print(f"Matt in: {mate} Zügen")
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-                return best_move  # Rückgabe des besten Zugs
-            else:
-                print("Fehler in der API-Antwort:", data.get("error", "Unbekannter Fehler"))
+        midpoints, labels, confidences = detect_pieces(frame, min_conf=min_conf)
+        if midpoints.shape[0] == 0:
+            continue
+
+        # Perspektive transformieren
+        ones = np.ones((midpoints.shape[0], 1))
+        mid_hom = np.hstack([midpoints, ones])
+        transformed = M @ mid_hom.T
+        transformed /= transformed[2, :]
+        transformed = transformed[:2, :].T
+
+        if white_side == "Rechts":
+            rotated = np.zeros_like(transformed)
+            rotated[:, 0] = 800 - transformed[:, 0]
+            rotated[:, 1] = 800 - transformed[:, 1]
+            rotated_labels = labels[:]
         else:
-            print(f"Fehler bei der Kommunikation mit der Stockfish API. Status code: {response.status_code}")
-            print(f"Antwort: {response.text}")
+            rotated = transformed
+            rotated_labels = labels[:]
 
-    except Exception as e:
-        print(f"Ein Fehler ist aufgetreten: {e}")
+        new_fen = generate_placement_from_board(rotated, rotated_labels)
+        move = fen_diff_to_move(old_fen, new_fen, color=color)
+        if move:
+            success_fen = new_fen
+            break
 
-    return None  # Falls kein Zug empfohlen wurde
+    # Framepointer zurücksetzen, damit wir im Haupt-Loop nicht "vorspringen"
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_pos)
 
-def get_board_svg(fen, best_move):
-    import chess
-    import chess.svg
-
-    board = chess.Board(fen)
-
-    # Wenn ein bester Zug vorhanden ist, erstellen wir einen Pfeil
-    if best_move:
-        try:
-            move = chess.Move.from_uci(best_move)
-            arrows = [chess.svg.Arrow(move.from_square, move.to_square, color='#FF0000')]
-        except ValueError:
-            arrows = []
+    if success_fen is not None:
+        return True, success_fen
     else:
-        arrows = []
+        return False, old_fen
 
-    # Erzeuge ein SVG-Bild des Schachbretts mit dem Pfeil
-    board_svg = chess.svg.board(board=board, size=400, arrows=arrows)
-    return board_svg
 
-def plot_points_with_correction(image, A, B, C, D_calculated, D_corrected):
-    fig, ax = plt.subplots(1, figsize=(8, 8))
-    ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-    colors = {'A': 'red', 'B': 'green', 'C': 'blue', 'D_calculated': 'yellow', 'D_corrected': 'magenta'}
+def main():
+    print("=== Video -> Schachzug-Erkennung (Frame-für-Frame Suche nach Grundstellung & Single-Frame-Fix) ===")
 
-    # Zeichne die Punkte A, B, C
-    points = {'A': A, 'B': B, 'C': C}
-    for label, point in points.items():
-        ax.plot(point[0], point[1], 'o', color=colors[label])
-        ax.text(point[0], point[1], label, fontsize=12, color='white',
-                bbox=dict(facecolor=colors[label], alpha=0.5))
+    video_path = input("Gib den Pfad zum Schachspiel-Video ein: ")
+    if not os.path.exists(video_path):
+        print("Videodatei nicht gefunden.")
+        return
 
-    # Zeichne D_calculated
-    ax.plot(D_calculated[0], D_calculated[1], 'o', color=colors['D_calculated'])
-    ax.text(D_calculated[0], D_calculated[1], 'D_calculated', fontsize=12, color='white',
-            bbox=dict(facecolor=colors['D_calculated'], alpha=0.5))
-
-    # Zeichne D_corrected
-    ax.plot(D_corrected[0], D_corrected[1], 'o', color=colors['D_corrected'])
-    ax.text(D_corrected[0], D_corrected[1], 'D_corrected', fontsize=12, color='white',
-            bbox=dict(facecolor=colors['D_corrected'], alpha=0.5))
-
-    # Zeichne den Korrekturvektor als Pfeil von D_calculated zu D_corrected
-    ax.arrow(D_calculated[0], D_calculated[1],
-             D_corrected[0] - D_calculated[0], D_corrected[1] - D_calculated[1],
-             head_width=10, head_length=15, fc='magenta', ec='magenta', linestyle='--')
-
-    plt.title("Eckpunkte mit Korrektur des Punktes D")
-    plt.axis('off')
-    plt.show()
-
-def process_video(video_path):
     cap = cv2.VideoCapture(video_path)
-
-    # Überprüfen, ob das Video geladen werden konnte
     if not cap.isOpened():
         print("Fehler beim Laden des Videos.")
         return
 
-    previous_fen = None
-    move_counter = 0
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0:
+        fps = 25.0
 
-    # Frame-Rate reduzieren (z.B. jedes 10. Frame verarbeiten)
-    frame_skip = 10
-    frame_count = 0
+    # 0.1 bis 0.2 Sekunden (Beispiel)
+    frame_interval = max(1, int(fps * 0.2))
 
-    while cap.isOpened():
+    # 1) Ecken finden
+    corners_found = False
+    M = None
+    while True:
         ret, frame = cap.read()
         if not ret:
-            break  # Ende des Videos
+            break
+        cpoints = detect_corners(frame)
+        if cpoints is not None:
+            corners_found = True
+            A = cpoints["A"]
+            B = cpoints["B"]
+            C = cpoints["C"]
+            D_calc = calculate_point_D(A, B, C)
+            D_corr = adjust_point_D(A, B, C, D_calc, PERCENT_AB, PERCENT_BC)
+            sorted_pts = sort_points(A, B, C, D_corr.astype(int))
+            M = cv2.getPerspectiveTransform(
+                sorted_pts,
+                np.array([[0, 0], [0, 799], [799, 799], [799, 0]], dtype=np.float32)
+            )
+            print("Eckpunkte erkannt, M berechnet.")
+            break
 
-        frame_count += 1
-        if frame_count % frame_skip != 0:
-            continue  # Überspringe dieses Frame
+    if not corners_found or M is None:
+        print("Keine Ecken erkannt. Abbruch.")
+        return
 
-        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    # 2) Suche nach Standard-Aufstellung (Grundstellung) -> Wo spielt Weiß?
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    white_side = None
+    found_start_position = False
 
-        try:
-            # Schritt 1: Erkennung der Schachfiguren
-            piece_midpoints, piece_labels, piece_results = detect_pieces(frame)
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            # Video zu Ende -> nicht gefunden
+            break
 
-            # Schritt 2: Erkennung der Eckpunkte
-            detected_points, corner_results = detect_corners(frame)
-            if detected_points is None:
-                print("Nicht alle Eckpunkte erkannt. Überspringe dieses Frame.")
-                continue
-
-            # Schritt 3: Berechnung der Ecke D und Perspektivtransformation
-            A = detected_points["A"]
-            B = detected_points["B"]
-            C = detected_points["C"]
-            D_calculated = calculate_point_D(A, B, C)
-
-            # Anpassung des Punktes D mit dem dynamischen Korrekturvektor
-            D_corrected = adjust_point_D(A, B, C, D_calculated)
-
-            # Optional: Visualisierung von D_calculated und D_corrected
-            # plot_points_with_correction(frame, A, B, C, D_calculated, D_corrected)
-
-            # Sortiere die Punkte
-            sorted_points = sort_points(A, B, C, D_corrected.astype(int))
-
-            # Perspektivtransformation durchführen
-            warped_image, M = warp_perspective(image_rgb, sorted_points)
-
-            # Schritt 4: Schachfiguren transformieren
-            ones = np.ones((piece_midpoints.shape[0], 1))
-            piece_midpoints_homogeneous = np.hstack([piece_midpoints, ones])
-            transformed_midpoints = M @ piece_midpoints_homogeneous.T
-            transformed_midpoints /= transformed_midpoints[2, :]  # Homogenisierung
-            transformed_midpoints = transformed_midpoints[:2, :].T  # Zurück zu kartesischen Koordinaten
-
-            # Drehe das entzerrte Bild und die transformierten Mittelpunkte
-            rotated_warped_image = rotate_image(warped_image)
-
-            rotated_midpoints = np.zeros_like(transformed_midpoints)
-            rotated_midpoints[:, 0] = rotated_warped_image.shape[1] - transformed_midpoints[:, 1]
-            rotated_midpoints[:, 1] = transformed_midpoints[:, 0]
-
-            # Schritt 5: Generiere die FEN-Notation
-            fen_string = generate_fen_from_board(rotated_midpoints, piece_labels)
-
-            # Vergleiche die FEN-Notation mit der vorherigen
-            if fen_string != previous_fen:
-                print(f"Neuer Zug erkannt: {fen_string}")
-                previous_fen = fen_string
-
-                # Schritt 6: Analyse der FEN-Notation mit der Stockfish API
-                best_move = analyze_fen_with_stockfish(fen_string)
-
-                # Schritt 7: Darstellung der FEN-Notation mit dem empfohlenen Zug
-                board_svg = get_board_svg(fen_string, best_move)
-
-                # Speichere das SVG-Bild in einer temporären Datei
-                with tempfile.NamedTemporaryFile('w', delete=False, suffix='.svg') as f:
-                    f.write(board_svg)
-                    svg_filename = f.name
-
-                # Öffne das SVG-Bild im Standard-Webbrowser
-                webbrowser.open('file://' + os.path.realpath(svg_filename))
-
-            # Zeige das aktuelle Frame an (optional)
-            cv2.imshow('Aktuelles Frame', frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-
-        except Exception as e:
-            print(f"Fehler bei der Verarbeitung des Frames: {e}")
+        midpoints, labels, _ = detect_pieces(frame, min_conf=0.7)
+        if midpoints.shape[0] == 0:
             continue
 
+        # Perspektive
+        ones = np.ones((midpoints.shape[0], 1))
+        mid_hom = np.hstack([midpoints, ones])
+        transformed = M @ mid_hom.T
+        transformed /= transformed[2, :]
+        transformed = transformed[:2, :].T
+
+        # Teste beide Seiten: "Links" vs. "Rechts"
+        for side in ["Links", "Rechts"]:
+            if side == "Rechts":
+                test_mid = np.zeros_like(transformed)
+                test_mid[:, 0] = 800 - transformed[:, 0]
+                test_mid[:, 1] = 800 - transformed[:, 1]
+            else:
+                test_mid = transformed
+
+            test_fen = generate_placement_from_board(test_mid, labels)
+            if test_fen == STARTING_PLACEMENT:
+                white_side = side
+                print(f"Grundstellung erkannt: Weiß spielt auf {white_side}.")
+                found_start_position = True
+                break
+
+        if found_start_position:
+            break
+
+    if not found_start_position:
+        # User fragen, wenn man es nicht automatisch herausgefunden hat
+        print("Konnte nicht automatisch feststellen, wo Weiß spielt. Bitte wählen:")
+        answer = input("Links/Rechts? ")
+        if answer not in ["Links", "Rechts"]:
+            answer = "Links"
+        white_side = answer
+        print(f"Setze Weiß auf {white_side}")
+
+    # 3) Video nochmal abspielen, um Züge zu erkennen
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+    previous_player_turn = None
+    previous_fen = STARTING_PLACEMENT if found_start_position else None
+    color = 'w'  # wir fangen standardmäßig an: Weiß am Zug
+
+    # Leeres PGN-Spiel
+    game = chess.pgn.Game()
+    node = game
+    global_board = chess.Board()  # Standard-Start
+
+    if previous_fen is None:
+        # Falls wir die Startstellung gar nicht haben, aber der user "Links" oder "Rechts" gewählt hat:
+        # => global_board = chess.Board() => previous_fen = global_board.fen().split()[0] = rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR
+        # Du kannst es auch so lassen, je nachdem wie du's brauchst
+        global_board = chess.Board()
+        previous_fen = global_board.fen().split(" ")[0]
+
+    while True:
+        frame_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
+        ret, frame = cap.read()
+        if not ret:
+            break  # Video Ende
+
+        current_frame_index = int(frame_pos)
+
+        if current_frame_index % frame_interval != 0:
+            continue
+
+        # Schachuhr
+        player_turn, _ = detect_player_turn(frame, visualize=False)
+
+        # Wenn sich die Uhrposition von left->right (etc.) ändert und nicht 'hold'
+        if player_turn is not None and player_turn != 'hold' and player_turn != previous_player_turn:
+            print(f"[Frame {current_frame_index}] Uhr geändert: {previous_player_turn} -> {player_turn}")
+            midpoints, labels, confidences = detect_pieces(frame, min_conf=0.7)
+            if midpoints.shape[0] > 0:
+                # Perspektive
+                ones = np.ones((midpoints.shape[0], 1))
+                mid_hom = np.hstack([midpoints, ones])
+                transformed = M @ mid_hom.T
+                transformed /= transformed[2, :]
+                transformed = transformed[:2, :].T
+
+                if white_side == "Rechts":
+                    rotated = np.zeros_like(transformed)
+                    rotated[:, 0] = 800 - transformed[:, 0]
+                    rotated[:, 1] = 800 - transformed[:, 1]
+                    rotated_labels = labels[:]
+                    rotated_conf = confidences[:]
+                else:
+                    rotated = transformed
+                    rotated_labels = labels[:]
+                    rotated_conf = confidences[:]
+
+                current_fen = generate_placement_from_board(rotated, rotated_labels)
+
+                if previous_fen is not None and current_fen != previous_fen:
+                    print(f"Neue FEN: {current_fen}")
+                    # Visualisierung
+                    warped_image, _ = warp_perspective(frame, sorted_pts)
+                    fig = plot_final_board(warped_image, rotated, rotated_labels, rotated_conf)
+                    if fig:
+                        plt.show()
+
+                    move = fen_diff_to_move(previous_fen, current_fen, color=color)
+                    if move and move in global_board.legal_moves:
+                        # Legal
+                        global_board.push(move)
+                        node = node.add_variation(move)
+                        print(f"Legal: {move} (color={color}) => Board: {global_board.fen()}")
+                        # Farbe toggeln
+                        color = 'b' if color == 'w' else 'w'
+                        previous_fen = current_fen
+                    else:
+                        # Illegal => Fix: Frame-für-Frame
+                        print("Kein legaler Zug => Versuche Frame-für-Frame-Fix ...")
+                        fixed_ok, fixed_fen = fix_fen_with_single_frames_on_the_fly(
+                            cap, current_frame_index, frame_interval,
+                            M, white_side,
+                            old_fen=previous_fen, color=color,
+                            max_tries=10, min_conf=0.7
+                        )
+                        if fixed_ok:
+                            move2 = fen_diff_to_move(previous_fen, fixed_fen, color=color)
+                            if move2 and move2 in global_board.legal_moves:
+                                global_board.push(move2)
+                                node = node.add_variation(move2)
+                                print(f"Erfolgreich repariert: {move2} (color={color})")
+                                color = 'b' if color == 'w' else 'w'
+                                previous_fen = fixed_fen
+                            else:
+                                print("Trotz Fix kein legaler Zug -> FEN ignoriert.")
+                        else:
+                            print("Konnte keinen legalen Zug aus den Folgeframes ermitteln -> FEN ignoriert.")
+                else:
+                    if previous_fen is None:
+                        previous_fen = current_fen
+
+        previous_player_turn = player_turn
+
     cap.release()
-    cv2.destroyAllWindows()
-    print("Videoverarbeitung abgeschlossen.")
 
-def main():
-    print("Schachbrett- und Figuren-Erkennung aus Video")
+    print("\n=== Resultierendes PGN ===")
+    print(game)
+    print("Fertig.")
 
-    # Video-Pfad eingeben
-    video_path = input("Gib den Pfad zum Schachspiel-Video ein: ")
-
-    if os.path.exists(video_path):
-        process_video(video_path)
-    else:
-        print("Videodatei nicht gefunden. Bitte überprüfe den Pfad.")
 
 if __name__ == "__main__":
     main()
-# Beispielvideopfad:
-# C:/Test_Images_Yolo/IMG_6135.mp4

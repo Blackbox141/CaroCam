@@ -1,0 +1,25 @@
+names:
+- Black Bishop
+- Black Extra Queen
+- Black King
+- Black Knight
+- Black Pawn
+- Black Queen
+- Black Rook
+- White Bishop
+- White Extra Queen
+- White King
+- White Knight
+- White Pawn
+- White Queen
+- White Rook
+nc: 14
+roboflow:
+  license: CC BY 4.0
+  project: carocam-project
+  url: https://universe.roboflow.com/carocam/carocam-project/dataset/8
+  version: 8
+  workspace: carocam
+test: ../test/images
+train: ../train/images
+val: ../valid/images

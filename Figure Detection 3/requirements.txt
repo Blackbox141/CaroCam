@@ -1,0 +1,9 @@
+numpy==1.24.4
+opencv-python
+matplotlib
+ultralytics
+roboflow
+requests
+torch
+torchaudio
+pillow

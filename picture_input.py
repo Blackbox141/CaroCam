@@ -11,7 +11,7 @@ import webbrowser
 import tempfile
 import io
 
-# Holen des aktuellen Skriptverzeichnisses - Testbild C:/Test_Images_Yolo/IMG_zug1.jpeg
+# Holen des aktuellen Skriptverzeichnisses - Testbild C:/Test_Images_Yolo/IMG_6661.jpeg
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Relativer Pfad zum Modell zur Erkennung der Schachfiguren
