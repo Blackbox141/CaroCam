@@ -15,7 +15,7 @@ import io
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Relativer Pfad zum Modell zur Erkennung der Schachfiguren
-piece_model_path = os.path.join(BASE_DIR, 'Figure Detection 2', 'runs', 'detect', 'yolov8-chess31', 'weights', 'best.pt')
+piece_model_path = os.path.join(BASE_DIR, 'Figure Detection 3', 'runs', 'detect', 'yolov8-chess32', 'weights', 'best.pt')
 
 # Relativer Pfad zum Modell zur Erkennung der Eckpunkte
 corner_model_path = os.path.join(BASE_DIR, 'Corner Detection 2', 'runs', 'detect', 'yolov8n_corner14', 'weights', 'best.pt')
