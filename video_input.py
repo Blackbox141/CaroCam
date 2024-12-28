@@ -2,17 +2,24 @@ import numpy as np
 import cv2
 from ultralytics import YOLO
 import os
+import requests
+import tempfile
+import io
+import webbrowser
+import time
+import datetime
 import matplotlib.pyplot as plt
-import chess
-import chess.pgn
 import logging
 
-# Logging unterdrücken für ultralytics
+# python-chess (für die echte PGN-Generierung)
+import chess
+import chess.pgn
+
+# Unterdrücke ggf. die ultralytics-Logs:
 logging.getLogger("ultralytics").setLevel(logging.ERROR)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# An deine Pfade anpassen
 piece_model_path = os.path.join(
     BASE_DIR, 'Figure Detection 3', 'runs', 'detect', 'yolov8-chess32', 'weights', 'best.pt'
 )
@@ -31,7 +38,6 @@ else:
     print("Modelldatei nicht gefunden.")
     exit()
 
-# Mapping von YOLO-Klassen zu FEN-Buchstaben
 FEN_MAPPING = {
     'Black Pawn': 'p',
     'Black Bishop': 'b',
@@ -47,19 +53,21 @@ FEN_MAPPING = {
     'White Knight': 'N'
 }
 
-# Standard-Aufstellung (FEN)
-STARTING_PLACEMENT = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
-
-# Zwei Korrektur-Parameter für den vierten Eckpunkt
 PERCENT_AB = 0.17
 PERCENT_BC = -0.07
 
+STARTING_PLACEMENT = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
+
 
 def detect_pieces(image, min_conf=0.7):
-    """Erkennt Schachfiguren per YOLO."""
+    """
+    Erkennen aller Schachfiguren im Bild mittels YOLO-Modell.
+    Nur Figuren akzeptieren, deren Confidence >= min_conf.
+    Gibt midpoints, labels und confidences zurück.
+    """
     results = piece_model.predict(
         image,
-        conf=0.05,  # absichtlich niedrig, damit YOLO mehr Boxen anbietet
+        conf=0.05,  # bewusst niedriger, damit YOLO viele Boxen anbietet
         iou=0.3,
         imgsz=1400,
         verbose=False
@@ -79,10 +87,8 @@ def detect_pieces(image, min_conf=0.7):
         if conf_val < min_conf:
             continue
 
-        # Mittelpunkt in x
         mid_x = x1 + (x2 - x1) / 2
-        # Mittelpunkt in y, aber etwas tiefer:
-        mid_y = y1 + (y2 - y1) * 0.75
+        mid_y = y1 + (y2 - y1) * 0.75  # kleiner offset nach unten
 
         midpoints.append([mid_x, mid_y])
         labels.append(label)
@@ -92,7 +98,9 @@ def detect_pieces(image, min_conf=0.7):
 
 
 def detect_corners(image):
-    """Erkennt die 3 Eckpunkte A, B, C per YOLO."""
+    """
+    Erkennen der 3 Eckpunkte (A, B, C) des Schachbretts.
+    """
     results = corner_model(
         image,
         conf=0.1,
@@ -105,6 +113,7 @@ def detect_corners(image):
         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
         center_x = int((x1 + x2) / 2)
         center_y = int((y1 + y2) / 2)
+
         cls_id = int(box.cls.cpu().numpy()[0])
         if cls_id == 0:
             points["A"] = np.array([center_x, center_y])
@@ -119,7 +128,10 @@ def detect_corners(image):
 
 
 def detect_player_turn(image, visualize=False):
-    """Erkennt mit clock_model: 'left', 'right', 'hold' oder None."""
+    """
+    Gibt IMMER ZWEI Werte zurück:
+      (player_turn, results)  oder (player_turn, None)
+    """
     results = clock_model(
         image,
         conf=0.1,
@@ -136,11 +148,13 @@ def detect_player_turn(image, visualize=False):
         label = class_names[cls_id]
         labels.append(label)
 
-    player_turn = None
     if 'left' in labels:
         player_turn = 'left'
     elif 'right' in labels:
         player_turn = 'right'
+    else:
+        player_turn = None
+
     if 'hold' in labels:
         player_turn = 'hold'
 
@@ -151,32 +165,34 @@ def detect_player_turn(image, visualize=False):
 
 
 def calculate_point_D(A, B, C):
-    """Rechnet den vierten Eckpunkt D = A + (C - B)."""
     BC = C - B
-    return A + BC
+    D_calculated = A + BC
+    return D_calculated
 
 
 def adjust_point_D(A, B, C, D_calculated, percent_AB, percent_BC):
-    """Korrigiert D um eine kleine Verschiebung basierend auf Vektoren AB und BC."""
     AB = B - A
     BC = C - B
     correction_vector = percent_AB * AB + percent_BC * BC
-    return D_calculated + correction_vector
+    D_corrected = D_calculated + correction_vector
+    return D_corrected
 
 
 def sort_points(A, B, C, D):
-    """Sortiert die vier Eckpunkte für OpenCVs getPerspectiveTransform."""
-    pts = np.array([A, B, C, D])
-    pts = sorted(pts, key=lambda x: x[1])
-    top_pts = sorted(pts[:2], key=lambda x: x[0])
-    bot_pts = sorted(pts[2:], key=lambda x: x[0])
-    A_sorted, D_sorted = top_pts
-    B_sorted, C_sorted = bot_pts
+    points = np.array([A, B, C, D])
+    points = sorted(points, key=lambda x: x[1])
+    top_points = sorted(points[:2], key=lambda x: x[0])
+    bottom_points = sorted(points[2:], key=lambda x: x[0])
+    A_sorted, D_sorted = top_points
+    B_sorted, C_sorted = bottom_points
     return np.array([A_sorted, B_sorted, C_sorted, D_sorted], dtype=np.float32)
 
 
 def warp_perspective(image, src_points):
-    """Entzerrt das Bild auf 800x800 und dreht um 180°, damit es nicht auf dem Kopf steht."""
+    """
+    Entzerrt das Bild auf 800x800 und dreht es um 180°,
+    damit die visuelle Anzeige nicht auf dem Kopf steht.
+    """
     dst_size = 800
     dst_points = np.array([
         [0, 0],
@@ -186,16 +202,15 @@ def warp_perspective(image, src_points):
     ], dtype=np.float32)
 
     M = cv2.getPerspectiveTransform(src_points, dst_points)
-    warped = cv2.warpPerspective(image, M, (dst_size, dst_size))
-    # 180°-Rotation
-    warped = cv2.rotate(warped, cv2.ROTATE_180)
-    return warped, M
+    warped_image = cv2.warpPerspective(image, M, (dst_size, dst_size))
+    warped_image = cv2.rotate(warped_image, cv2.ROTATE_180)
+    return warped_image, M
 
 
 def plot_final_board(image, midpoints, labels, confidences):
     """
-    Zeichnet ein 8x8-Gitter auf das entzerrte Bild,
-    schreibt an die erkannte Figur-Position die FEN-Figur + Confidence.
+    Zeichnet ein 8x8-Raster auf das gegebene (entzerrte) Bild
+    und schreibt an die erkannten Positionen die Figur + Confidence in %.
     """
     if midpoints.shape[0] == 0:
         return None
@@ -206,18 +221,18 @@ def plot_final_board(image, midpoints, labels, confidences):
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.imshow(image, extent=[0, image.shape[1], image.shape[0], 0])
 
-    # Gitterlinien
     for i in range(grid_size + 1):
         ax.axhline(i * step_size, color='black', linewidth=1)
         ax.axvline(i * step_size, color='black', linewidth=1)
 
-    # Spalten (A..H) und Reihen (1..8)
+    # Spalten-Buchstaben
     for i in range(grid_size):
         ax.text(i * step_size + step_size / 2,
                 image.shape[0] - 10,
                 chr(65 + i),
                 fontsize=12, color='black',
                 ha='center', va='center')
+        # Reihen-Zahlen
         ax.text(10,
                 i * step_size + step_size / 2,
                 str(grid_size - i),
@@ -229,10 +244,11 @@ def plot_final_board(image, midpoints, labels, confidences):
         row = int(y // step_size)
         if 0 <= row < grid_size and 0 <= col < grid_size:
             fen_char = FEN_MAPPING.get(lbl, '?')
-            cx = col * step_size + step_size / 2
-            cy = row * step_size + step_size / 2
-            text_str = f"{fen_char}({conf_val*100:.1f}%)"
-            ax.text(cx, cy, text_str,
+            square_x = col * step_size + step_size / 2
+            square_y = row * step_size + step_size / 2
+            text_str = f"{fen_char}({conf_val * 100:.1f}%)"
+            ax.text(square_x, square_y,
+                    text_str,
                     fontsize=14, color='red',
                     ha='center', va='center')
 
@@ -242,31 +258,28 @@ def plot_final_board(image, midpoints, labels, confidences):
 
 
 def generate_placement_from_board(midpoints, labels, grid_size=8):
-    """
-    Wandelt (x,y)+Label in eine FEN-Zeichenkette um.
-    (x→col, y→row) mit Umkehrung row = 7 - (x//step_size)
-    """
     board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
     step_size = 800 // grid_size
-    for (mx, my), lbl in zip(midpoints, labels):
-        c = int(my // step_size)
-        r = 7 - int(mx // step_size)
-        if 0 <= r < grid_size and 0 <= c < grid_size:
+
+    for (x, y), lbl in zip(midpoints, labels):
+        col = int(y // step_size)
+        row = 7 - int(x // step_size)
+        if 0 <= row < grid_size and 0 <= col < grid_size:
             fen_char = FEN_MAPPING.get(lbl, '')
-            board[r][c] = fen_char
+            board[row][col] = fen_char
 
     fen_rows = []
     for row_data in board:
         empty_count = 0
         fen_row = ''
-        for sq in row_data:
-            if sq == '':
+        for square in row_data:
+            if square == '':
                 empty_count += 1
             else:
                 if empty_count > 0:
                     fen_row += str(empty_count)
                     empty_count = 0
-                fen_row += sq
+                fen_row += square
         if empty_count > 0:
             fen_row += str(empty_count)
         fen_rows.append(fen_row)
@@ -275,7 +288,11 @@ def generate_placement_from_board(midpoints, labels, grid_size=8):
 
 
 def fen_diff_to_move(fen1, fen2, color='w'):
-    """Prüft alle legalen Züge von fen1 aus (python-chess), ob fen2 erzeugt wird."""
+    """
+    Try-all-legal-moves:
+    Baue aus fen1 + color + KQkq - 0 1 ein Schachbrett,
+    teste jeden legalen Zug, ob er fen2 ergibt.
+    """
     if not fen1 or not fen2:
         return None
 
@@ -291,6 +308,7 @@ def fen_diff_to_move(fen1, fen2, color='w'):
         if fen_part == fen2:
             return move
         board.pop()
+
     return None
 
 
@@ -300,14 +318,23 @@ def fix_fen_with_single_frames_on_the_fly(cap, current_frame_index, frame_interv
                                           max_tries=10,
                                           min_conf=0.7):
     """
-    Versucht nacheinander in den nächsten max_tries Frames,
-    eine FEN zu finden, die old_fen in einen legalen Zug überführt.
-    Sobald eine legale FEN gefunden wird, return (True, new_fen).
-    Ansonsten (False, old_fen).
+    Versucht, durch NACHEINANDERLESEN EINZELNER FRAMES
+    eine neue FEN zu erhalten, die im Vergleich zu old_fen
+    einen legalen Zug bildet.
+
+    Ablauf:
+      - bis zu max_tries mal den nächsten Frame laden
+      - Figurenerkennung -> FEN
+      - wenn fen_diff_to_move(old_fen, new_fen) legal, return (True, new_fen)
+      - sonst weiter
+    Falls kein Erfolg: return (False, old_fen)
     """
+
     start_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
 
+    used_frames = 0
     success_fen = None
+
     for _ in range(max_tries):
         next_frame_pos = current_frame_index + frame_interval
         cap.set(cv2.CAP_PROP_POS_FRAMES, next_frame_pos)
@@ -315,35 +342,45 @@ def fix_fen_with_single_frames_on_the_fly(cap, current_frame_index, frame_interv
 
         ret, frame = cap.read()
         if not ret:
+            # Keine weiteren Frames
             break
 
+        # Erkennung
         midpoints, labels, confidences = detect_pieces(frame, min_conf=min_conf)
         if midpoints.shape[0] == 0:
+            used_frames += 1
             continue
 
-        # Perspektive transformieren
+        # Perspektivische Transformation
         ones = np.ones((midpoints.shape[0], 1))
-        mid_hom = np.hstack([midpoints, ones])
-        transformed = M @ mid_hom.T
+        midpoints_hom = np.hstack([midpoints, ones])
+        transformed = M @ midpoints_hom.T
         transformed /= transformed[2, :]
         transformed = transformed[:2, :].T
 
+        # Falls Weiß rechts, drehen
         if white_side == "Rechts":
-            rotated = np.zeros_like(transformed)
-            rotated[:, 0] = 800 - transformed[:, 0]
-            rotated[:, 1] = 800 - transformed[:, 1]
+            rotated_mid = np.zeros_like(transformed)
+            rotated_mid[:, 0] = 800 - transformed[:, 0]
+            rotated_mid[:, 1] = 800 - transformed[:, 1]
             rotated_labels = labels[:]
+            rotated_conf = confidences[:]
         else:
-            rotated = transformed
+            rotated_mid = transformed
             rotated_labels = labels[:]
+            rotated_conf = confidences[:]
 
-        new_fen = generate_placement_from_board(rotated, rotated_labels)
+        new_fen = generate_placement_from_board(rotated_mid, rotated_labels)
+
         move = fen_diff_to_move(old_fen, new_fen, color=color)
         if move:
+            # => legaler Zug
             success_fen = new_fen
             break
 
-    # Framepointer zurücksetzen, damit wir im Haupt-Loop nicht "vorspringen"
+        used_frames += 1
+
+    # Wieder Framepointer zurück
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_pos)
 
     if success_fen is not None:
@@ -353,7 +390,7 @@ def fix_fen_with_single_frames_on_the_fly(cap, current_frame_index, frame_interv
 
 
 def main():
-    print("=== Video -> Schachzug-Erkennung (Frame-für-Frame Suche nach Grundstellung & Single-Frame-Fix) ===")
+    print("Video -> Schachzug-Erkennung mit Frame-für-Frame-Fix (kein Mehrheitsabgleich)")
 
     video_path = input("Gib den Pfad zum Schachspiel-Video ein: ")
     if not os.path.exists(video_path):
@@ -369,185 +406,190 @@ def main():
     if fps <= 0:
         fps = 25.0
 
-    # 0.1 bis 0.2 Sekunden (Beispiel)
     frame_interval = max(1, int(fps * 0.2))
 
-    # 1) Ecken finden
-    corners_found = False
-    M = None
+    # --- Eckpunkte-Erkennung (A, B, C) ---
+    corners_detected = False
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-        cpoints = detect_corners(frame)
-        if cpoints is not None:
-            corners_found = True
-            A = cpoints["A"]
-            B = cpoints["B"]
-            C = cpoints["C"]
-            D_calc = calculate_point_D(A, B, C)
-            D_corr = adjust_point_D(A, B, C, D_calc, PERCENT_AB, PERCENT_BC)
-            sorted_pts = sort_points(A, B, C, D_corr.astype(int))
-            M = cv2.getPerspectiveTransform(
-                sorted_pts,
-                np.array([[0, 0], [0, 799], [799, 799], [799, 0]], dtype=np.float32)
-            )
-            print("Eckpunkte erkannt, M berechnet.")
+        detected_points = detect_corners(frame)
+        if detected_points is not None:
+            corners_detected = True
+            A = detected_points["A"]
+            B = detected_points["B"]
+            C = detected_points["C"]
+            print("Eckpunkte erkannt.")
             break
 
-    if not corners_found or M is None:
+    if not corners_detected:
         print("Keine Ecken erkannt. Abbruch.")
         return
 
-    # 2) Suche nach Standard-Aufstellung (Grundstellung) -> Wo spielt Weiß?
-    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-    white_side = None
-    found_start_position = False
+    D_calc = calculate_point_D(A, B, C)
+    D_corr = adjust_point_D(A, B, C, D_calc, PERCENT_AB, PERCENT_BC)
+    sorted_pts = sort_points(A, B, C, D_corr.astype(int))
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            # Video zu Ende -> nicht gefunden
-            break
+    M = cv2.getPerspectiveTransform(
+        sorted_pts,
+        np.array([[0, 0], [0, 799], [799, 799], [799, 0]], dtype=np.float32)
+    )
 
-        midpoints, labels, _ = detect_pieces(frame, min_conf=0.7)
-        if midpoints.shape[0] == 0:
-            continue
-
-        # Perspektive
-        ones = np.ones((midpoints.shape[0], 1))
-        mid_hom = np.hstack([midpoints, ones])
-        transformed = M @ mid_hom.T
-        transformed /= transformed[2, :]
-        transformed = transformed[:2, :].T
-
-        # Teste beide Seiten: "Links" vs. "Rechts"
-        for side in ["Links", "Rechts"]:
-            if side == "Rechts":
-                test_mid = np.zeros_like(transformed)
-                test_mid[:, 0] = 800 - transformed[:, 0]
-                test_mid[:, 1] = 800 - transformed[:, 1]
-            else:
-                test_mid = transformed
-
-            test_fen = generate_placement_from_board(test_mid, labels)
-            if test_fen == STARTING_PLACEMENT:
-                white_side = side
-                print(f"Grundstellung erkannt: Weiß spielt auf {white_side}.")
-                found_start_position = True
-                break
-
-        if found_start_position:
-            break
-
-    if not found_start_position:
-        # User fragen, wenn man es nicht automatisch herausgefunden hat
-        print("Konnte nicht automatisch feststellen, wo Weiß spielt. Bitte wählen:")
-        answer = input("Links/Rechts? ")
-        if answer not in ["Links", "Rechts"]:
-            answer = "Links"
-        white_side = answer
-        print(f"Setze Weiß auf {white_side}")
-
-    # 3) Video nochmal abspielen, um Züge zu erkennen
+    # Zurückspulen (wir wollen ab Frame 0 erneut loslegen)
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
     previous_player_turn = None
-    previous_fen = STARTING_PLACEMENT if found_start_position else None
-    color = 'w'  # wir fangen standardmäßig an: Weiß am Zug
+    previous_fen = None
+    color = 'w'  # abwechselnd w/b
 
-    # Leeres PGN-Spiel
+    white_side = None
+    user_white_side = None
+
+    # PGN
     game = chess.pgn.Game()
     node = game
     global_board = chess.Board()  # Standard-Start
-
-    if previous_fen is None:
-        # Falls wir die Startstellung gar nicht haben, aber der user "Links" oder "Rechts" gewählt hat:
-        # => global_board = chess.Board() => previous_fen = global_board.fen().split()[0] = rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR
-        # Du kannst es auch so lassen, je nachdem wie du's brauchst
-        global_board = chess.Board()
-        previous_fen = global_board.fen().split(" ")[0]
 
     while True:
         frame_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
         ret, frame = cap.read()
         if not ret:
-            break  # Video Ende
+            break  # Video zu Ende
 
         current_frame_index = int(frame_pos)
 
+        # Nur alle frame_interval Frames
         if current_frame_index % frame_interval != 0:
             continue
 
-        # Schachuhr
+        # Uhr abfragen
         player_turn, _ = detect_player_turn(frame, visualize=False)
 
-        # Wenn sich die Uhrposition von left->right (etc.) ändert und nicht 'hold'
+        # Wenn sich die Uhrposition ändert und NICHT 'hold'
         if player_turn is not None and player_turn != 'hold' and player_turn != previous_player_turn:
             print(f"[Frame {current_frame_index}] Uhr geändert: {previous_player_turn} -> {player_turn}")
+
             midpoints, labels, confidences = detect_pieces(frame, min_conf=0.7)
             if midpoints.shape[0] > 0:
                 # Perspektive
                 ones = np.ones((midpoints.shape[0], 1))
-                mid_hom = np.hstack([midpoints, ones])
-                transformed = M @ mid_hom.T
+                midpoints_hom = np.hstack([midpoints, ones])
+                transformed = M @ midpoints_hom.T
                 transformed /= transformed[2, :]
                 transformed = transformed[:2, :].T
 
-                if white_side == "Rechts":
-                    rotated = np.zeros_like(transformed)
-                    rotated[:, 0] = 800 - transformed[:, 0]
-                    rotated[:, 1] = 800 - transformed[:, 1]
-                    rotated_labels = labels[:]
-                    rotated_conf = confidences[:]
-                else:
-                    rotated = transformed
-                    rotated_labels = labels[:]
-                    rotated_conf = confidences[:]
-
-                current_fen = generate_placement_from_board(rotated, rotated_labels)
-
-                if previous_fen is not None and current_fen != previous_fen:
-                    print(f"Neue FEN: {current_fen}")
-                    # Visualisierung
-                    warped_image, _ = warp_perspective(frame, sorted_pts)
-                    fig = plot_final_board(warped_image, rotated, rotated_labels, rotated_conf)
-                    if fig:
-                        plt.show()
-
-                    move = fen_diff_to_move(previous_fen, current_fen, color=color)
-                    if move and move in global_board.legal_moves:
-                        # Legal
-                        global_board.push(move)
-                        node = node.add_variation(move)
-                        print(f"Legal: {move} (color={color}) => Board: {global_board.fen()}")
-                        # Farbe toggeln
-                        color = 'b' if color == 'w' else 'w'
-                        previous_fen = current_fen
-                    else:
-                        # Illegal => Fix: Frame-für-Frame
-                        print("Kein legaler Zug => Versuche Frame-für-Frame-Fix ...")
-                        fixed_ok, fixed_fen = fix_fen_with_single_frames_on_the_fly(
-                            cap, current_frame_index, frame_interval,
-                            M, white_side,
-                            old_fen=previous_fen, color=color,
-                            max_tries=10, min_conf=0.7
-                        )
-                        if fixed_ok:
-                            move2 = fen_diff_to_move(previous_fen, fixed_fen, color=color)
-                            if move2 and move2 in global_board.legal_moves:
-                                global_board.push(move2)
-                                node = node.add_variation(move2)
-                                print(f"Erfolgreich repariert: {move2} (color={color})")
-                                color = 'b' if color == 'w' else 'w'
-                                previous_fen = fixed_fen
-                            else:
-                                print("Trotz Fix kein legaler Zug -> FEN ignoriert.")
+                if white_side is None:
+                    fen_found = False
+                    for side in ["Links", "Rechts"]:
+                        if side == "Links":
+                            rotated_mid = transformed.copy()
+                            rotated_labels = labels[:]
+                            rotated_conf = confidences[:]
                         else:
-                            print("Konnte keinen legalen Zug aus den Folgeframes ermitteln -> FEN ignoriert.")
+                            rotated_mid = np.zeros_like(transformed)
+                            rotated_mid[:, 0] = 800 - transformed[:, 0]
+                            rotated_mid[:, 1] = 800 - transformed[:, 1]
+                            rotated_labels = labels[:]
+                            rotated_conf = confidences[:]
+
+                        test_fen = generate_placement_from_board(rotated_mid, rotated_labels)
+                        if test_fen == STARTING_PLACEMENT:
+                            white_side = side
+                            fen_found = True
+                            previous_fen = test_fen
+                            global_board = chess.Board()
+                            print(f"Weiß erkannt auf {white_side}, Startstellung bestätigt.")
+                            # Optional Visualisierung
+                            warped_image, _ = warp_perspective(frame, sorted_pts)
+                            fig = plot_final_board(warped_image, rotated_mid, rotated_labels, rotated_conf)
+                            if fig:
+                                plt.show()
+                            break
+
+                    if not fen_found:
+                        # Nutzer fragen
+                        if user_white_side is None:
+                            print("Konnte nicht automatisch feststellen, wo Weiß ist.")
+                            user_white_side = input("Bitte wählen: Links/Rechts? ")
+                            if user_white_side not in ["Links", "Rechts"]:
+                                user_white_side = "Links"
+                            white_side = user_white_side
+
+                        if white_side == "Rechts":
+                            rotated_mid = np.zeros_like(transformed)
+                            rotated_mid[:, 0] = 800 - transformed[:, 0]
+                            rotated_mid[:, 1] = 800 - transformed[:, 1]
+                            rotated_labels = labels[:]
+                            rotated_conf = confidences[:]
+                        else:
+                            rotated_mid = transformed.copy()
+                            rotated_labels = labels[:]
+                            rotated_conf = confidences[:]
+
+                        test_fen = generate_placement_from_board(rotated_mid, rotated_labels)
+                        if previous_fen is None:
+                            previous_fen = test_fen
+                            # Optional Visualisierung
+                            warped_image, _ = warp_perspective(frame, sorted_pts)
+                            fig = plot_final_board(warped_image, rotated_mid, rotated_labels, rotated_conf)
+                            if fig:
+                                plt.show()
+
                 else:
-                    if previous_fen is None:
-                        previous_fen = current_fen
+                    # Weiß-Seite bekannt
+                    if white_side == "Rechts":
+                        rotated_mid = np.zeros_like(transformed)
+                        rotated_mid[:, 0] = 800 - transformed[:, 0]
+                        rotated_mid[:, 1] = 800 - transformed[:, 1]
+                        rotated_labels = labels[:]
+                        rotated_conf = confidences[:]
+                    else:
+                        rotated_mid = transformed.copy()
+                        rotated_labels = labels[:]
+                        rotated_conf = confidences[:]
+
+                    current_fen = generate_placement_from_board(rotated_mid, rotated_labels)
+                    if previous_fen is not None and current_fen != previous_fen:
+                        print(f"Neue FEN: {current_fen}")
+                        # Visualisierung
+                        warped_image, _ = warp_perspective(frame, sorted_pts)
+                        fig = plot_final_board(warped_image, rotated_mid, rotated_labels, rotated_conf)
+                        if fig:
+                            plt.show()
+
+                        move = fen_diff_to_move(previous_fen, current_fen, color=color)
+                        if move and move in global_board.legal_moves:
+                            global_board.push(move)
+                            node = node.add_variation(move)
+                            print(f"Legal: {move} (color={color}) -> Board nun {global_board.fen()}")
+                            color = 'b' if color == 'w' else 'w'
+                            previous_fen = current_fen
+                        else:
+                            # Kein legaler Zug => Frame-für-Frame-Fix
+                            print("Kein legaler Zug -> Versuche Fix mit nächsten Einzel-Frames ...")
+                            fixed_ok, fixed_fen = fix_fen_with_single_frames_on_the_fly(
+                                cap, current_frame_index, frame_interval,
+                                M, white_side,
+                                old_fen=previous_fen, color=color,
+                                max_tries=10, min_conf=0.7
+                            )
+                            if fixed_ok:
+                                move2 = fen_diff_to_move(previous_fen, fixed_fen, color=color)
+                                if move2 and move2 in global_board.legal_moves:
+                                    global_board.push(move2)
+                                    node = node.add_variation(move2)
+                                    print(f"Einzel-Frame-Korrektur erfolgreich: {move2} (color={color})")
+                                    color = 'b' if color == 'w' else 'w'
+                                    previous_fen = fixed_fen
+                                else:
+                                    print("Trotz Korrektur kein legaler Zug. FEN ignoriert.")
+                            else:
+                                print("Frame-für-Frame-Korrektur konnte den Zug nicht reparieren. FEN ignoriert.")
+                    else:
+                        # Falls previous_fen None ist oder FEN sich nicht ändert
+                        if previous_fen is None:
+                            previous_fen = current_fen
 
         previous_player_turn = player_turn
 

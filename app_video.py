@@ -19,6 +19,9 @@ logging.getLogger("ultralytics").setLevel(logging.ERROR)
 # ==============================
 st.set_page_config(page_title="CaroCam - Schach-Tracker", layout="wide")
 
+# ------------------------------
+# Dictionary für FEN-Symbole
+# ------------------------------
 FEN_MAPPING = {
     'Black Pawn': 'p',
     'Black Bishop': 'b',
@@ -34,26 +37,28 @@ FEN_MAPPING = {
     'White Knight': 'N'
 }
 
-# Farbzuordnung für verschiedene Figurenklassen:
-COLOR_MAP = {
-    'White Pawn': (255, 255, 255),
-    'Black Pawn': (40, 40, 40),
-    'White King': (255, 0, 0),
-    'Black King': (0, 0, 255),
-    'White Queen': (0, 255, 255),
-    'Black Queen': (255, 255, 0),
-    'White Rook': (0, 255, 0),
-    'Black Rook': (0, 128, 255),
-    'White Bishop': (128, 0, 128),
-    'Black Bishop': (128, 128, 0),
-    'White Knight': (255, 0, 255),
-    'Black Knight': (255, 128, 0),
-}
-
 STARTING_PLACEMENT = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
 PERCENT_AB = 0.17
 PERCENT_BC = -0.07
 
+# -----------------------------
+# Auffälligere Farben
+# für jede Figurenklasse (BGR)
+# -----------------------------
+PIECE_COLORS = {
+    'White Pawn':   (255, 255, 0),    # knalliges Gelb
+    'White Knight': (255, 153, 51),   # Orange
+    'White Bishop': (0, 255, 255),    # Cyan
+    'White Rook':   (0, 255, 0),      # Hellgrün
+    'White Queen':  (255, 0, 255),    # Magenta
+    'White King':   (255, 128, 128),  # Hellrot
+    'Black Pawn':   (128, 128, 128),  # Grau
+    'Black Knight': (0, 0, 255),      # Rot
+    'Black Bishop': (102, 0, 204),    # Violett
+    'Black Rook':   (255, 0, 0),      # Blau im BGR
+    'Black Queen':  (255, 255, 255),        # Schwarz
+    'Black King':   (128, 0, 128)     # Dunkel-Lila
+}
 
 # ==============================
 # Stockfish-Logik
@@ -70,7 +75,6 @@ def check_stockfish_api_available():
     except:
         pass
     return False
-
 
 def analyze_fen_with_stockfish(fen, depth=15):
     url = 'https://stockfish.online/api/s/v2.php'
@@ -89,7 +93,6 @@ def analyze_fen_with_stockfish(fen, depth=15):
                     tokens = raw_best_move.split()
                     if len(tokens) >= 2:
                         best_move = tokens[1]
-
                 return best_move, evaluation, mate
             else:
                 return None, "None", None
@@ -98,21 +101,8 @@ def analyze_fen_with_stockfish(fen, depth=15):
     except:
         return None, "None", None
 
-
-def create_chessboard_svg(
-        fen_str,
-        last_move=None,
-        check_color='red',
-        highlight_color='green',
-        size=350
-):
-    """
-    Erzeugt ein SVG-Bild des Boards (aus fen_str),
-    - Letzter Zug in highlight_color (from und to Feld),
-    - König im Schach: Feld in check_color.
-    """
+def create_chessboard_svg(fen_str, last_move=None, check_color='red', highlight_color='green', size=350):
     board = chess.Board(fen_str)
-
     style = f"""
     .square.lastmove {{
         fill: {highlight_color} !important;
@@ -121,14 +111,10 @@ def create_chessboard_svg(
         fill: {check_color} !important;
     }}
     """
-
     lm = None
     if last_move:
         try:
-            if isinstance(last_move, chess.Move):
-                lm = last_move
-            else:
-                lm = chess.Move.from_uci(str(last_move))
+            lm = chess.Move.from_uci(str(last_move))
         except:
             lm = None
 
@@ -138,31 +124,26 @@ def create_chessboard_svg(
         if king_square is not None:
             check_square = king_square
 
-    return chess.svg.board(
+    board_svg = chess.svg.board(
         board=board,
         lastmove=lm,
         check=check_square,
         size=size,
         style=style
     )
-
+    return board_svg
 
 def create_chessboard_svg_with_bestmove(fen_str, best_move_uci, arrow_color='blue', size=350):
-    """
-    Erzeugt ein SVG-Bild des Boards (aus fen_str),
-    zeichnet dabei den als UCI-String übergebenen
-    besten Zug als Pfeil in arrow_color.
-    """
     board = chess.Board(fen_str)
     arrows = []
     if best_move_uci:
         try:
-            bm = chess.Move.from_uci(str(best_move_uci))
+            bm = chess.Move.from_uci(best_move_uci)
             arrows = [chess.svg.Arrow(bm.from_square, bm.to_square, color=arrow_color)]
         except:
             pass
-    return chess.svg.board(board=board, size=size, arrows=arrows)
-
+    board_svg = chess.svg.board(board=board, size=size, arrows=arrows)
+    return board_svg
 
 # ==============================
 # Model-Ladefunktionen
@@ -192,18 +173,13 @@ def load_models():
     clock_model = YOLO(clock_model_path)
     return piece_model, corner_model, clock_model
 
-
 # ==============================
 # Hilfsfunktionen
 # ==============================
 def detect_pieces(image, piece_model, min_conf=0.7):
-    """
-    Erfasst alle Figuren-Boxen (ggf. mit sehr niedriger conf=0.05),
-    ABER wir filtern beim Zeichnen in create_mega_image noch mal.
-    """
     results = piece_model.predict(
         image,
-        conf=0.05,  # wir lassen hier 0.05
+        conf=0.05,
         iou=0.3,
         imgsz=1400,
         verbose=False
@@ -218,7 +194,9 @@ def detect_pieces(image, piece_model, min_conf=0.7):
         conf_val = float(box.conf.cpu().numpy()[0])
         label = class_names[cls_id]
 
-        # Wir sammeln erstmal ALLES
+        if conf_val < min_conf:
+            continue
+
         mid_x = x1 + (x2 - x1) / 2
         mid_y = y1 + (y2 - y1) * 0.75
 
@@ -226,7 +204,6 @@ def detect_pieces(image, piece_model, min_conf=0.7):
         labels.append(label)
         confidences.append(conf_val)
     return np.array(midpoints), labels, confidences, result
-
 
 def detect_corners(image, corner_model):
     results = corner_model(
@@ -239,10 +216,9 @@ def detect_corners(image, corner_model):
     points = {}
     for box in results[0].boxes:
         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-        center_x = int((x1 + x2) / 2)
-        center_y = int((y1 + y2) / 2)
+        center_x = int((x1 + x2)/2)
+        center_y = int((y1 + y2)/2)
         cls_id = int(box.cls.cpu().numpy()[0])
-
         if cls_id == 0:
             points["A"] = np.array([center_x, center_y])
         elif cls_id == 1:
@@ -251,9 +227,8 @@ def detect_corners(image, corner_model):
             points["C"] = np.array([center_x, center_y])
 
     if len(points) != 3:
-        return None, results
+        return None, None
     return points, results
-
 
 def detect_player_turn(image, clock_model):
     results = clock_model(
@@ -280,18 +255,15 @@ def detect_player_turn(image, clock_model):
         player_turn = 'hold'
     return player_turn, results[0]
 
-
 def calculate_point_D(A, B, C):
     BC = C - B
     return A + BC
-
 
 def adjust_point_D(A, B, C, D_calculated, percent_AB, percent_BC):
     AB = B - A
     BC = C - B
     correction_vector = percent_AB * AB + percent_BC * BC
     return D_calculated + correction_vector
-
 
 def sort_points(A, B, C, D):
     pts = np.array([A, B, C, D])
@@ -301,7 +273,6 @@ def sort_points(A, B, C, D):
     A_sorted, D_sorted = top_pts
     B_sorted, C_sorted = bot_pts
     return np.array([A_sorted, B_sorted, C_sorted, D_sorted], dtype=np.float32)
-
 
 def warp_perspective(image, src_points):
     dst_size = 800
@@ -313,8 +284,9 @@ def warp_perspective(image, src_points):
     ], dtype=np.float32)
     M = cv2.getPerspectiveTransform(src_points, dst_points)
     warped = cv2.warpPerspective(image, M, (dst_size, dst_size))
+    # Brett drehen
+    warped = cv2.rotate(warped, cv2.ROTATE_180)
     return warped, M
-
 
 def generate_placement_from_board(midpoints, labels, grid_size=8):
     board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
@@ -343,7 +315,6 @@ def generate_placement_from_board(midpoints, labels, grid_size=8):
         fen_rows.append(fen_row)
     return '/'.join(fen_rows)
 
-
 def fen_diff_to_move(fen1, fen2, color='w'):
     if not fen1 or not fen2:
         return None
@@ -361,13 +332,15 @@ def fen_diff_to_move(fen1, fen2, color='w'):
         board.pop()
     return None
 
-
+# Fix-Funktion mit Rückgabe des passenden Frames
 def fix_fen_with_single_frames_on_the_fly(
-        cap, current_frame_index, frame_interval, M, white_side,
-        old_fen, color, piece_model, max_tries=10, min_conf=0.7
+    cap, current_frame_index, frame_interval, M, white_side,
+    old_fen, color, piece_model, max_tries=10, min_conf=0.7
 ):
     start_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
     success_fen = None
+    success_frame = None
+
     for _ in range(max_tries):
         next_frame_pos = current_frame_index + frame_interval
         cap.set(cv2.CAP_PROP_POS_FRAMES, next_frame_pos)
@@ -398,14 +371,15 @@ def fix_fen_with_single_frames_on_the_fly(
         move = fen_diff_to_move(old_fen, new_fen, color=color)
         if move:
             success_fen = new_fen
+            success_frame = frame
             break
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_pos)
-    if success_fen is not None:
-        return True, success_fen
-    else:
-        return False, old_fen
 
+    if success_fen is not None:
+        return True, success_fen, success_frame
+    else:
+        return False, old_fen, None
 
 def remove_pgn_headers(pgn_string):
     lines = pgn_string.split("\n")
@@ -416,13 +390,11 @@ def remove_pgn_headers(pgn_string):
         cleaned_lines.append(line)
     return "\n".join(cleaned_lines)
 
-
-# -----------------------------------------------
-# Bild 1: ALLES in einem (Ecken-BB, D, Figuren, Uhr)
-# -----------------------------------------------
+# ===============================
+# FUNKTIONEN FÜR DIE 2 BILDER
+# ===============================
 def create_mega_image(
         original,
-        corner_results,
         corners,
         D_calc,
         D_corr,
@@ -430,95 +402,91 @@ def create_mega_image(
         piece_midpoints,
         piece_labels,
         piece_confs,
-        clock_boxes=None
-):
+        clock_boxes=None,
+        corner_result=None
+    ):
     """
     Bild 1:
-      - Corner-BoundingBoxes (gelb)
-      - Eckpunkte A,B,C + D_calc, D_corr + Pfeil
-      - Figuren-BoundingBoxes (farbig je Klasse), Conf (nur > 0.6)
-      - Uhr-BoundingBox (falls vorhanden)
-      - Mittelpunkte der Figuren
+      - Alle Ecken + D-Korrektur + Pfeil
+      - Figuren-BoundingBoxes (eingefärbt nach Klassen) + Conf
+      - Uhr (optional)
+      - Mittelpunkte
+      - Corner-BoundingBoxes (optional)
     """
     out = original.copy()
 
-    # 1) Corner-BoundingBoxes (aus corner_results)
-    if corner_results is not None:
-        for box in corner_results[0].boxes:
+    # 1) Corner-BoundingBoxes
+    if corner_result is not None:
+        for box in corner_result.boxes:
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-            cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 255), 2)
+            cls_id = int(box.cls.cpu().numpy()[0])
+            corner_label = corner_result.names[cls_id]
+            cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 255), 2)
+            cv2.putText(
+                out, corner_label,
+                (int(x1), int(y1)-5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2
+            )
 
-    # 2) Eckpunkte
-    if corners:
+    # 2) Ecken-Kreise + Beschriftung
+    if corners is not None:
         A = corners["A"]
         B = corners["B"]
         C = corners["C"]
         cv2.circle(out, (A[0], A[1]), 10, (0, 0, 255), -1)
-        cv2.putText(out, "A", (A[0] + 10, A[1] + 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        cv2.putText(out, "A", (A[0]+10, A[1]+10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
         cv2.circle(out, (B[0], B[1]), 10, (0, 255, 255), -1)
-        cv2.putText(out, "B", (B[0] + 10, B[1] + 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+        cv2.putText(out, "B", (B[0]+10, B[1]+10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
         cv2.circle(out, (C[0], C[1]), 10, (255, 0, 255), -1)
-        cv2.putText(out, "C", (C[0] + 10, C[1] + 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
+        cv2.putText(out, "C", (C[0]+10, C[1]+10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
 
+        # D calc/corr
         Dc = (int(D_calc[0]), int(D_calc[1]))
         Dco = (int(D_corr[0]), int(D_corr[1]))
         cv2.circle(out, Dc, 10, (255, 0, 0), -1)
-        cv2.putText(out, "D_calc", (Dc[0] + 10, Dc[1] + 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+        cv2.putText(out, "D_calc", (Dc[0]+10, Dc[1]+10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+
         cv2.circle(out, Dco, 10, (255, 0, 255), -1)
-        cv2.putText(out, "D_corr", (Dco[0] + 10, Dco[1] + 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
+        cv2.putText(out, "D_corr", (Dco[0]+10, Dco[1]+10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
+
+        # Pfeil von D_calc zu D_corr
         cv2.arrowedLine(out, Dc, Dco, (255, 0, 255), 3)
 
-    # 3) Figuren-BoundingBoxes (nur conf >= 0.6)
+    # 3) Figuren-BoundingBoxes
     for box in piece_result.boxes:
         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
         cls_id = int(box.cls.cpu().numpy()[0])
         label = piece_result.names[cls_id]
         conf_val = float(box.conf.cpu().numpy()[0])
+        color = PIECE_COLORS.get(label, (128, 128, 128))
 
-        # Hier filtern wir: nur wenn conf_val >= 0.6
-        if conf_val < 0.6:
-            continue
-
-        color = COLOR_MAP.get(label, (125, 125, 125))  # farbe je klasse
         cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
-        txt = f"{label} {conf_val * 100:.1f}%"
-        cv2.putText(out, txt, (int(x1), int(y1) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+        txt = f"{label} {conf_val*100:.1f}%"
+        cv2.putText(out, txt, (int(x1), int(y1)-5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
 
     # 4) Mittelpunkte
-    #    Da wir nicht wissen, welche confidence jeder midpoint hat,
-    #    können wir OPTIONAL filtern. Falls du nur Mittelpunkte
-    #    ab 0.6 haben willst, mach if piece_confs[i] >= 0.6
-    for i, (mx_my, lbl) in enumerate(zip(piece_midpoints, piece_labels)):
-        conf_val = piece_confs[i]
-        if conf_val < 0.6:
-            continue
-
-        mx, my = int(mx_my[0]), int(mx_my[1])
-        mcol = COLOR_MAP.get(lbl, (255, 255, 255))
-        cv2.circle(out, (mx, my), 4, mcol, -1)
+    for (mx, my), lbl in zip(piece_midpoints, piece_labels):
+        color = PIECE_COLORS.get(lbl, (0, 255, 0))
+        cv2.circle(out, (int(mx), int(my)), 4, color, -1)
 
     # 5) Uhr
     if clock_boxes is not None:
         for box in clock_boxes:
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
             cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), (255, 255, 0), 2)
-            cv2.putText(out, "clock", (int(x1), int(y1) - 5), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
+            cv2.putText(out, "clock", (int(x1), int(y1)-5), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
 
     return out
 
-
-# -----------------------------------------------
-# Bild 2: Entzerrtes Brett + Gitter, FEN-Kürzel
-# -----------------------------------------------
 def create_warped_image_with_grid_and_fen(warped, M, midpoints, labels):
     """
-    Bild 2:
-      - Raster (ohne Beschriftungen)
-      - Figuren-FEN-Kürzel an den Mittelpunkten
-      - KEINE 180°-Drehung => Richtig herum
+    Bild 2: Entzerrtes Brett mit Raster (ohne Beschriftung),
+    Figuren-FEN-Kürzel an den Mittelpunkten.
+    (nochmals um 180° gedreht zur Darstellung)
     """
-    out = warped.copy()
-    # Raster:
+    out = cv2.rotate(warped, cv2.ROTATE_180)
+
+    # Raster
     cell = out.shape[0] // 8
     for i in range(9):
         # horizontale
@@ -528,27 +496,26 @@ def create_warped_image_with_grid_and_fen(warped, M, midpoints, labels):
         x = i * cell
         cv2.line(out, (x, 0), (x, out.shape[0]), (0, 0, 0), 2)
 
-    # midpoints transform
-    ones = np.ones((midpoints.shape[0], 1))
+    # Transform midpoints
+    ones = np.ones((midpoints.shape[0],1))
     hom = np.hstack([midpoints, ones])
     trans = M @ hom.T
-    trans /= trans[2, :]
-    trans = trans[:2, :].T
+    trans /= trans[2,:]
+    trans = trans[:2,:].T
 
     for (mx, my), lbl in zip(trans, labels):
         fen_char = FEN_MAPPING.get(lbl, '?')
         px, py = int(mx), int(my)
         cv2.circle(out, (px, py), 4, (255, 0, 0), -1)
-        cv2.putText(out, fen_char, (px + 5, py + 5), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
+        cv2.putText(out, fen_char, (px+5, py+5), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 2)
 
     return out
 
-
 # =====================================
-# Hauptfunktion
+# Streamlit - Hauptfunktion
 # =====================================
 def main():
-    st.title("CaroCam - KI-Schachanalyse von Luca und Dennis")
+    st.title("Digitales Schachbrett-Tracking mit YOLO und python-chess")
 
     stockfish_available = check_stockfish_api_available()
     if stockfish_available:
@@ -588,66 +555,68 @@ def main():
         # ------------------------------------------------
         # Erstelle 2 Bilder aus dem allerersten Frame
         # ------------------------------------------------
-        with st.expander("Hinter den Kulissen"):
-            st.write("Hier wird gezeigt, wie das Schachbrett gelabelt und entzerrt wird.")
+        with st.expander("Zwei Bilder (1. Frame)"):
+            st.write("Wir nehmen den ersten Frame und erstellen 2 Bilder:")
+
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             ret, first_frame = cap.read()
             if not ret:
                 st.warning("Konnte keinen Frame lesen.")
             else:
-                # 1) Corners + Figures
-                corners, corner_res = detect_corners(first_frame, corner_model)
-                if corners:
-                    A = corners["A"]
-                    B = corners["B"]
-                    C = corners["C"]
-                    D_calc = calculate_point_D(A, B, C)
-                    D_corr = adjust_point_D(A, B, C, D_calc, PERCENT_AB, PERCENT_BC)
+                # 1) Erkennung Ecken + D
+                cpoints, corner_res = detect_corners(first_frame, corner_model)
+                if not cpoints:
+                    st.warning("Keine Ecken erkannt (A,B,C).")
                 else:
-                    D_calc = np.array([0, 0])
-                    D_corr = np.array([0, 0])
+                    A = cpoints["A"]
+                    B = cpoints["B"]
+                    C = cpoints["C"]
+                    D_calc = calculate_point_D(A,B,C)
+                    D_corr = adjust_point_D(A,B,C,D_calc, PERCENT_AB, PERCENT_BC)
 
-                # 2) Pieces
+                # 2) Figuren
                 midpoints, labels, confs, piece_res = detect_pieces(first_frame, piece_model)
 
-                # 3) Clock
+                # 3) Uhr
                 clock_label, clock_res = detect_player_turn(first_frame, clock_model)
-                clock_boxes = clock_res.boxes if (clock_res and len(clock_res.boxes) > 0) else None
+                if clock_res and len(clock_res.boxes) > 0:
+                    clock_boxes = clock_res.boxes
+                else:
+                    clock_boxes = None
 
-                # Bild 1:
-                if corners:
+                # Bild 1: Mega-Image
+                if cpoints:
                     mega_img = create_mega_image(
                         original=first_frame,
-                        corner_results=corner_res,
-                        corners=corners,
+                        corners=cpoints,
                         D_calc=D_calc,
                         D_corr=D_corr,
                         piece_result=piece_res,
                         piece_midpoints=midpoints,
                         piece_labels=labels,
                         piece_confs=confs,
-                        clock_boxes=clock_boxes
+                        clock_boxes=clock_boxes,
+                        corner_result=corner_res[0]
                     )
-                    st.subheader("Bild 1: Erkannte Labels")
+                    st.subheader("Bild 1: Mega-Image mit ALLEM (Ecken, D, Figuren, Uhr, Mittelpunkte, Corner-Boxes)")
                     st.image(mega_img, channels="BGR")
                 else:
-                    st.warning("Keine Ecken erkannt - Bild 1 nicht verfügbar.")
+                    st.warning("Konnte kein Mega-Image erzeugen, da Ecken fehlen.")
 
-                # Bild 2: Entzerrtes Brett
-                if corners:
-                    sorted_pts = sort_points(A, B, C, D_corr.astype(int))
+                # Bild 2: Entzerrtes Brett mit Raster
+                if cpoints:
+                    sorted_pts = sort_points(A,B,C,D_corr.astype(int))
                     warped, M_ = warp_perspective(first_frame, sorted_pts)
-                    # Hier das Gitter + FEN-Kürzel, KEINE 180-Grad-Drehung
                     warped_img = create_warped_image_with_grid_and_fen(warped, M_, midpoints, labels)
-                    st.subheader("Bild 2: Entzerrtes Brett")
+                    st.subheader("Bild 2: Entzerrtes Brett (erneut um 180° gedreht) mit Gitter + FEN-Kürzeln")
                     st.image(warped_img, channels="BGR")
                 else:
-                    st.warning("Keine Ecken erkannt - Bild 2 nicht verfügbar.")
+                    st.warning("Konnte kein entzerrtes Bild erzeugen, da Ecken fehlen.")
 
         # -------------------------------------------
         # Normales Prozedere (Zug-Tracking)
         # -------------------------------------------
-        st.write("Starte die Spielanalyse...")
+        st.write("Starte das eigentliche Zug-Tracking...")
 
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         corners_found = False
@@ -706,7 +675,7 @@ def main():
                 if test_fen == STARTING_PLACEMENT:
                     white_side = side
                     found_start_position = True
-                    st.success(f"Grundstellung erkannt: Weiss spielt auf {white_side}")
+                    st.success(f"Grundstellung erkannt: Weiß spielt auf {white_side}")
                     break
 
             if found_start_position:
@@ -714,9 +683,9 @@ def main():
 
         if not found_start_position:
             st.warning("Keine automatische Grundstellung. Manuell wählen:")
-            user_side = st.radio("Wo ist Weiss?", ["Links", "Rechts"])
+            user_side = st.radio("Wo ist Weiß?", ["Links", "Rechts"])
             white_side = user_side
-            st.info(f"Setze Weiss auf {white_side}.")
+            st.info(f"Setze Weiß auf {white_side}.")
 
         st.write("Starte Zugerkennung...")
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -735,7 +704,9 @@ def main():
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         progress_bar = st.progress(0)
-        move_number = 1
+
+        # Anstatt move_number => halfmove_count
+        halfmove_count = 1
 
         while True:
             frame_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
@@ -751,7 +722,6 @@ def main():
 
             pturn, _clockresult = detect_player_turn(frame, clock_model)
             if pturn is not None and pturn != 'hold' and pturn != previous_player_turn:
-                # Figuren erkennen
                 midpoints, labels, confs, _ = detect_pieces(frame, piece_model, min_conf=0.7)
                 if midpoints.shape[0] > 0:
                     ones = np.ones((midpoints.shape[0], 1))
@@ -770,33 +740,30 @@ def main():
                         rotated_labels = labels[:]
 
                     current_fen = generate_placement_from_board(rotated, rotated_labels)
-
                     move = fen_diff_to_move(previous_fen, current_fen, color=color)
                     if move and move in global_board.legal_moves:
                         global_board.push(move)
                         node = node.add_variation(move)
 
-                        with st.expander(f"Zug {move_number}: {move}"):
+                        # Zug-Beschriftung: 1a oder 1b, 2a oder 2b ...
+                        if color == 'w':
+                            move_label = f"{(halfmove_count+1)//2}a: {move}"
+                        else:
+                            move_label = f"{(halfmove_count+1)//2}b: {move}"
+
+                        with st.expander(move_label):
                             colL, colR = st.columns(2)
                             with colL:
                                 st.image(frame, caption=f"Frame {frame_pos} - Original", channels="BGR")
                             with colR:
-                                # Neuer Hinweis: "Gespielter Zug"
-                                st.write(f"**Gespielter Zug:** {move}")
-
-                                full_fen_current = f"{current_fen} {('w' if color == 'b' else 'b')} KQkq - 0 1"
-                                board_svg = create_chessboard_svg(
-                                    fen_str=full_fen_current,
-                                    last_move=move,
-                                    check_color='red',
-                                    highlight_color='green'
-                                )
+                                full_fen_current = f"{current_fen} {('w' if color=='b' else 'b')} KQkq - 0 1"
+                                board_svg = create_chessboard_svg(full_fen_current, last_move=move)
+                                st.markdown("**Vorheriger Zug**", unsafe_allow_html=True)
                                 st.write(f"**FEN**: {current_fen}")
                                 st.components.v1.html(board_svg, height=400)
 
-                                # Stockfish
                                 if stockfish_available:
-                                    key_ana = f"analysis_{full_fen_current}_{move_number}"
+                                    key_ana = f"analysis_{full_fen_current}_{halfmove_count}"
                                     if key_ana not in st.session_state:
                                         st.session_state[key_ana] = analyze_fen_with_stockfish(full_fen_current)
 
@@ -814,7 +781,7 @@ def main():
                                                 height: 50px; 
                                                 position: relative; 
                                                 border: 2px solid #333; 
-                                                background: linear-gradient(to right, black {percent * 100}%, white {percent * 100}% 100%);
+                                                background: linear-gradient(to right, white {percent*100}%, black {percent*100}% 100%);
                                                 margin-top: 10px;
                                             '>
                                               <div style='
@@ -834,19 +801,17 @@ def main():
 
                                     if best_move:
                                         st.write(f"**Empfohlener nächster Zug:** {best_move}")
-                                        board_svg_bm = create_chessboard_svg_with_bestmove(
-                                            fen_str=full_fen_current,
-                                            best_move_uci=best_move,
-                                            arrow_color='blue'
-                                        )
+                                        board_svg_bm = create_chessboard_svg_with_bestmove(full_fen_current, best_move)
                                         st.components.v1.html(board_svg_bm, height=400)
 
+                        # Farbe wechseln
                         color = 'b' if color == 'w' else 'w'
                         previous_fen = current_fen
-                        move_number += 1
+                        halfmove_count += 1
+
                     else:
-                        # Fix
-                        fixed_ok, fixed_fen = fix_fen_with_single_frames_on_the_fly(
+                        # Korrektur
+                        fixed_ok, fixed_fen, fix_frame = fix_fen_with_single_frames_on_the_fly(
                             cap=cap,
                             current_frame_index=int(frame_pos),
                             frame_interval=frame_interval,
@@ -864,25 +829,29 @@ def main():
                                 global_board.push(move2)
                                 node = node.add_variation(move2)
 
-                                with st.expander(f"Zug {move_number}: {move2}"):
+                                # Zug-Beschriftung
+                                if color == 'w':
+                                    move_label2 = f"{(halfmove_count+1)//2}a: {move2} (Korrektur)"
+                                else:
+                                    move_label2 = f"{(halfmove_count+1)//2}b: {move2} (Korrektur)"
+
+                                with st.expander(move_label2):
                                     colL, colR = st.columns(2)
                                     with colL:
-                                        st.image(frame, caption=f"Frame {frame_pos} - Original", channels="BGR")
-                                    with colR:
-                                        st.write(f"**Gespielter Zug:** {move2}")
-
-                                        full_fen_fixed = f"{fixed_fen} {('w' if color == 'b' else 'b')} KQkq - 0 1"
-                                        board_svg = create_chessboard_svg(
-                                            fen_str=full_fen_fixed,
-                                            last_move=move2,
-                                            check_color='red',
-                                            highlight_color='green'
+                                        st.image(
+                                            fix_frame,
+                                            caption=f"Korrektur-Frame mit gültigem Zug",
+                                            channels="BGR"
                                         )
+                                    with colR:
+                                        full_fen_fixed = f"{fixed_fen} {('w' if color=='b' else 'b')} KQkq - 0 1"
+                                        board_svg = create_chessboard_svg(full_fen_fixed, last_move=move2)
+                                        st.markdown("<h3>Vorheriger Zug</h3>", unsafe_allow_html=True)
                                         st.write(f"**FEN**: {fixed_fen}")
                                         st.components.v1.html(board_svg, height=400)
 
                                         if stockfish_available:
-                                            kfix = f"analysis_{full_fen_fixed}_{move_number}"
+                                            kfix = f"analysis_{full_fen_fixed}_{halfmove_count}"
                                             if kfix not in st.session_state:
                                                 st.session_state[kfix] = analyze_fen_with_stockfish(full_fen_fixed)
 
@@ -900,7 +869,7 @@ def main():
                                                         height: 50px; 
                                                         position: relative; 
                                                         border: 2px solid #333; 
-                                                        background: linear-gradient(to right, black {p2 * 100}%, white {p2 * 100}% 100%);
+                                                        background: linear-gradient(to right, white {p2*100}%, black {p2*100}% 100%);
                                                         margin-top: 10px;
                                                     '>
                                                       <div style='
@@ -920,16 +889,12 @@ def main():
 
                                             if bm2:
                                                 st.write(f"**Empfohlener nächster Zug:** {bm2}")
-                                                svg_bm2 = create_chessboard_svg_with_bestmove(
-                                                    fen_str=full_fen_fixed,
-                                                    best_move_uci=bm2,
-                                                    arrow_color='blue'
-                                                )
+                                                svg_bm2 = create_chessboard_svg_with_bestmove(full_fen_fixed, bm2)
                                                 st.components.v1.html(svg_bm2, height=400)
 
                                 color = 'b' if color == 'w' else 'w'
                                 previous_fen = fixed_fen
-                                move_number += 1
+                                halfmove_count += 1
                             else:
                                 pass
                         else:
@@ -946,8 +911,8 @@ def main():
 
         if global_board.is_game_over():
             if global_board.is_checkmate():
-                winner = "Weiss" if color == 'b' else "Schwarz"
-                st.success(f"Glückwunsch, {winner} hat gewonnen!")
+                winner = "Weiß" if color == 'b' else "Schwarz"
+                st.success(f"Glückwunsch, {winner} hat Matt gesetzt!")
             else:
                 st.info("Partie ist zu Ende (z.B. Patt oder Abbruch).")
         else:
@@ -957,9 +922,9 @@ def main():
         moves_only_pgn = remove_pgn_headers(raw_pgn)
 
         st.markdown(
-            """<h2 style='text-align:left; font-size:1.6em; 
+            """<h2 style='text-align:center; font-size:1.6em; 
                          color:#b00; margin-top:40px;'>
-               Ermittelte PGN des Spiels
+               Abschließende Partienotation
                </h2>""",
             unsafe_allow_html=True
         )
