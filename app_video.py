@@ -56,7 +56,7 @@ PIECE_COLORS = {
     'Black Knight': (0, 0, 255),      # Rot
     'Black Bishop': (102, 0, 204),    # Violett
     'Black Rook':   (255, 0, 0),      # Blau im BGR
-    'Black Queen':  (255, 255, 255),        # Schwarz
+    'Black Queen':  (255, 255, 255),  # Schwarz
     'Black King':   (128, 0, 128)     # Dunkel-Lila
 }
 
@@ -148,7 +148,8 @@ def create_chessboard_svg_with_bestmove(fen_str, best_move_uci, arrow_color='blu
 # ==============================
 # Model-Ladefunktionen
 # ==============================
-@st.cache_data(show_spinner=True)
+# ÄNDERUNG (1): Modelle nur EINMAL laden und cachen
+@st.cache_resource(show_spinner=True)
 def load_models():
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -415,7 +416,7 @@ def create_mega_image(
     """
     out = original.copy()
 
-    # 1) Corner-BoundingBoxes
+    # Corner-BoundingBoxes
     if corner_result is not None:
         for box in corner_result.boxes:
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
@@ -428,7 +429,7 @@ def create_mega_image(
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2
             )
 
-    # 2) Ecken-Kreise + Beschriftung
+    # Ecken-Kreise + Beschriftung
     if corners is not None:
         A = corners["A"]
         B = corners["B"]
@@ -449,10 +450,9 @@ def create_mega_image(
         cv2.circle(out, Dco, 10, (255, 0, 255), -1)
         cv2.putText(out, "D_corr", (Dco[0]+10, Dco[1]+10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
 
-        # Pfeil von D_calc zu D_corr
         cv2.arrowedLine(out, Dc, Dco, (255, 0, 255), 3)
 
-    # 3) Figuren-BoundingBoxes
+    # Figuren-BoundingBoxes
     for box in piece_result.boxes:
         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
         cls_id = int(box.cls.cpu().numpy()[0])
@@ -464,12 +464,12 @@ def create_mega_image(
         txt = f"{label} {conf_val*100:.1f}%"
         cv2.putText(out, txt, (int(x1), int(y1)-5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
 
-    # 4) Mittelpunkte
+    # Mittelpunkte
     for (mx, my), lbl in zip(piece_midpoints, piece_labels):
         color = PIECE_COLORS.get(lbl, (0, 255, 0))
         cv2.circle(out, (int(mx), int(my)), 4, color, -1)
 
-    # 5) Uhr
+    # Uhr
     if clock_boxes is not None:
         for box in clock_boxes:
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
@@ -529,6 +529,7 @@ def main():
     video_file = st.sidebar.file_uploader("Bitte ein Schachvideo hochladen", type=["mp4", "mov", "avi"])
     start_button = st.sidebar.button("Erkennung starten")
 
+    # ÄNDERUNG (4): Höherer frame_interval_factor -> weniger Frames
     frame_interval_factor = 0.2
     max_tries_fix = 60
 
@@ -705,7 +706,6 @@ def main():
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         progress_bar = st.progress(0)
 
-        # Anstatt move_number => halfmove_count
         halfmove_count = 1
 
         while True:
@@ -717,10 +717,14 @@ def main():
             current_progress = frame_pos / (total_frames if total_frames > 0 else 1)
             progress_bar.progress(min(current_progress, 1.0))
 
+            # ÄNDERUNG (4) & (6):
+            # -> Nicht jede Frame analysieren / clock detection nur im frame_interval
             if int(frame_pos) % frame_interval != 0:
                 continue
 
+            # Jetzt erfolgt clock detection NUR hier
             pturn, _clockresult = detect_player_turn(frame, clock_model)
+
             if pturn is not None and pturn != 'hold' and pturn != previous_player_turn:
                 midpoints, labels, confs, _ = detect_pieces(frame, piece_model, min_conf=0.7)
                 if midpoints.shape[0] > 0:
@@ -745,7 +749,7 @@ def main():
                         global_board.push(move)
                         node = node.add_variation(move)
 
-                        # Zug-Beschriftung: 1a oder 1b, 2a oder 2b ...
+                        # Nur bei erkanntem Move Output
                         if color == 'w':
                             move_label = f"{(halfmove_count+1)//2}a: {move}"
                         else:
@@ -804,7 +808,6 @@ def main():
                                         board_svg_bm = create_chessboard_svg_with_bestmove(full_fen_current, best_move)
                                         st.components.v1.html(board_svg_bm, height=400)
 
-                        # Farbe wechseln
                         color = 'b' if color == 'w' else 'w'
                         previous_fen = current_fen
                         halfmove_count += 1
@@ -829,7 +832,6 @@ def main():
                                 global_board.push(move2)
                                 node = node.add_variation(move2)
 
-                                # Zug-Beschriftung
                                 if color == 'w':
                                     move_label2 = f"{(halfmove_count+1)//2}a: {move2} (Korrektur)"
                                 else:
