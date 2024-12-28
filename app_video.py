@@ -515,7 +515,7 @@ def create_warped_image_with_grid_and_fen(warped, M, midpoints, labels):
 # Streamlit - Hauptfunktion
 # =====================================
 def main():
-    st.title("Digitales Schachbrett-Tracking mit YOLO und python-chess")
+    st.title("CaroCam")
 
     stockfish_available = check_stockfish_api_available()
     if stockfish_available:
