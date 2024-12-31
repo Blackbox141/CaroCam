@@ -154,7 +154,7 @@ def sort_points(A, B, C, D):
     return np.array([A_sorted, B_sorted, C_sorted, D_sorted], dtype=np.float32)
 
 def warp_perspective(image, src_points):
-    dst_size = 800  # Zielgröße 800x800 Pixel für das quadratische Schachbrett
+    dst_size = 800  # Zielgrösse 800x800 Pixel für das quadratische Schachbrett
     dst_points = np.array([
         [0, 0],  # A' (oben links)
         [0, dst_size - 1],  # B' (unten links)
@@ -174,7 +174,7 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
     # Erstelle ein leeres Schachbrett (8x8) als Liste von Listen
     board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
 
-    step_size = 800 // grid_size  # Größe jeder Zelle (entspricht der Größe des entzerrten Bildes)
+    step_size = 800 // grid_size  # Grösse jeder Zelle (entspricht der Grösse des entzerrten Bildes)
 
     # Fülle das Board mit den Figuren basierend auf den erkannten Mittelpunkten
     for point, label in zip(midpoints, labels):
@@ -187,7 +187,7 @@ def generate_fen_from_board(midpoints, labels, grid_size=8, player_to_move='w'):
             fen_char = FEN_MAPPING.get(label, '')
             board[row][col] = fen_char
         else:
-            # Ignoriere Figuren außerhalb des Schachbretts
+            # Ignoriere Figuren ausserhalb des Schachbretts
             pass
 
     # Reihenfolge der Reihen umkehren, um die FEN-Notation korrekt zu erstellen
@@ -225,7 +225,7 @@ def analyze_fen_with_stockfish(fen, depth=15):
     # URL mit den Parametern FEN und Tiefe aufbauen
     params = {
         'fen': fen,
-        'depth': min(depth, 15)  # Tiefe darf nicht größer als 15 sein
+        'depth': min(depth, 15)  # Tiefe darf nicht grösser als 15 sein
     }
 
     try:
@@ -290,7 +290,7 @@ def plot_board_with_move(fen, best_move, white_side):
     if white_side == "Links":
         flipped = True  # Brett aus der Sicht von Schwarz
     else:
-        flipped = False  # Brett aus der Sicht von Weiß
+        flipped = False  # Brett aus der Sicht von Weiss
 
     # Erzeuge ein SVG-Bild des Schachbretts mit dem Pfeil
     board_svg = chess.svg.board(
@@ -322,9 +322,9 @@ def main():
         # Bild anzeigen
         st.image(image_rgb, caption='Hochgeladenes Bild', use_column_width=True)
 
-        # Benutzer wählt, ob Weiß links oder rechts spielt
+        # Benutzer wählt, ob Weiss links oder rechts spielt
         st.subheader("Spielerpositionen")
-        white_side = st.selectbox("Auf welcher Seite spielt Weiß?", ("Links", "Rechts"))
+        white_side = st.selectbox("Auf welcher Seite spielt Weiss?", ("Links", "Rechts"))
 
         # Schritt 1: Erkennung der Schachfiguren
         piece_midpoints, piece_labels, piece_results = detect_pieces(image)
@@ -358,13 +358,13 @@ def main():
         height, width = warped_image.shape[:2]
 
         if white_side == "Rechts":
-            # Weiß spielt rechts, Brett um 90 Grad drehen
+            # Weiss spielt rechts, Brett um 90 Grad drehen
             rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_90_CLOCKWISE)
             rotated_midpoints = np.zeros_like(transformed_midpoints)
             rotated_midpoints[:, 0] = transformed_midpoints[:, 1]
             rotated_midpoints[:, 1] = width - transformed_midpoints[:, 0]
         elif white_side == "Links":
-            # Weiß spielt links, Brett um 270 Grad drehen (90 Grad gegen den Uhrzeigersinn)
+            # Weiss spielt links, Brett um 270 Grad drehen (90 Grad gegen den Uhrzeigersinn)
             rotated_warped_image = cv2.rotate(warped_image, cv2.ROTATE_90_COUNTERCLOCKWISE)
             rotated_midpoints = np.zeros_like(transformed_midpoints)
             rotated_midpoints[:, 0] = height - transformed_midpoints[:, 1]
@@ -376,10 +376,10 @@ def main():
         # Schritt 4b: Erkennung des Spielers am Zug
         player_turn, clock_result = detect_player_turn(image)
 
-        # Mappe 'left' und 'right' zu Spielern basierend auf der Position von Weiß
+        # Mappe 'left' und 'right' zu Spielern basierend auf der Position von Weiss
         if player_turn is None:
-            player_input = st.selectbox("Bitte wählen Sie, wer am Zug ist:", ("Weiß", "Schwarz"))
-            if player_input == "Weiß":
+            player_input = st.selectbox("Bitte wählen Sie, wer am Zug ist:", ("Weiss", "Schwarz"))
+            if player_input == "Weiss":
                 player_turn = 'white'
             else:
                 player_turn = 'black'
@@ -389,7 +389,7 @@ def main():
                     player_turn = 'white'
                 else:
                     player_turn = 'black'
-            else:  # Weiß spielt rechts
+            else:  # Weiss spielt rechts
                 if player_turn == 'right':
                     player_turn = 'white'
                 else:

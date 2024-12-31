@@ -124,7 +124,7 @@ def sort_points(A, B, C, D):
     return np.array([A_sorted, B_sorted, C_sorted, D_sorted], dtype=np.float32)
 
 def warp_perspective(image, src_points):
-    dst_size = 800  # Zielgröße 800x800 Pixel für das quadratische Schachbrett
+    dst_size = 800  # Zielgrösse 800x800 Pixel für das quadratische Schachbrett
     dst_points = np.array([
         [0, 0],  # A' (oben links)
         [0, dst_size - 1],  # B' (unten links)
@@ -188,7 +188,7 @@ def plot_transformed_pieces(image, midpoints, labels):
 
 def plot_final_board(image, midpoints, labels):
     grid_size = 8
-    step_size = image.shape[0] // grid_size  # Größe jeder Zelle
+    step_size = image.shape[0] // grid_size  # Grösse jeder Zelle
 
     fig, ax = plt.subplots(1, figsize=(8, 8))
     ax.imshow(image)
@@ -218,8 +218,8 @@ def plot_final_board(image, midpoints, labels):
 
             ax.text(square_x, square_y, FEN_MAPPING[label], fontsize=20, color='red', ha='center', va='center')
         else:
-            # Ignoriere Figuren außerhalb des Schachbretts
-            print(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist außerhalb des Schachbretts und wird nicht dargestellt.")
+            # Ignoriere Figuren ausserhalb des Schachbretts
+            print(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist ausserhalb des Schachbretts und wird nicht dargestellt.")
 
     plt.title("Schachbrett mit Figurenpositionen")
     plt.axis('off')
@@ -229,7 +229,7 @@ def generate_fen_from_board(midpoints, labels, grid_size=8):
     # Erstelle ein leeres Schachbrett (8x8) in Form einer Liste
     board = [['' for _ in range(grid_size)] for _ in range(grid_size)]
 
-    step_size = 800 // grid_size  # Größe jeder Zelle (entspricht der Größe des entzerrten Bildes)
+    step_size = 800 // grid_size  # Grösse jeder Zelle (entspricht der Grösse des entzerrten Bildes)
 
     # Fülle das Board mit den Figuren
     for point, label in zip(midpoints, labels):
@@ -242,8 +242,8 @@ def generate_fen_from_board(midpoints, labels, grid_size=8):
             fen_char = FEN_MAPPING.get(label, '')
             board[row][col] = fen_char
         else:
-            # Ignoriere Figuren außerhalb des Schachbretts
-            print(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist außerhalb des Schachbretts und wird ignoriert.")
+            # Ignoriere Figuren ausserhalb des Schachbretts
+            print(f"Figur '{label}' an Position ({x:.2f}, {y:.2f}) ist ausserhalb des Schachbretts und wird ignoriert.")
 
     # Erstelle die FEN-Notation
     fen_rows = []
@@ -262,8 +262,8 @@ def generate_fen_from_board(midpoints, labels, grid_size=8):
             fen_row += str(empty_count)
         fen_rows.append(fen_row)
 
-    # Verbinde alle Zeilen mit Schrägstrichen und hänge standardmäßige FEN-Informationen an
-    fen_string = '/'.join(fen_rows) + " w - - 0 1"  # "w" (Weiß am Zug), keine Rochade, keine En-passant, 0 Züge, Zug 1
+    # Verbinde alle Zeilen mit Schrägstrichen und hänge standardmässige FEN-Informationen an
+    fen_string = '/'.join(fen_rows) + " w - - 0 1"  # "w" (Weiss am Zug), keine Rochade, keine En-passant, 0 Züge, Zug 1
 
     return fen_string
 
@@ -273,7 +273,7 @@ def analyze_fen_with_stockfish(fen, depth=15):
     # URL mit den Parametern FEN und Tiefe aufbauen
     params = {
         'fen': fen,
-        'depth': min(depth, 15)  # Tiefe darf nicht größer als 15 sein
+        'depth': min(depth, 15)  # Tiefe darf nicht grösser als 15 sein
     }
 
     try:

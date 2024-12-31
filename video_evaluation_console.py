@@ -358,7 +358,7 @@ def fix_fen_with_single_frames_on_the_fly(cap, current_frame_index, frame_interv
         transformed /= transformed[2, :]
         transformed = transformed[:2, :].T
 
-        # Falls Weiß rechts, drehen
+        # Falls Weiss rechts, drehen
         if white_side == "Rechts":
             rotated_mid = np.zeros_like(transformed)
             rotated_mid[:, 0] = 800 - transformed[:, 0]
@@ -499,7 +499,7 @@ def main():
                             fen_found = True
                             previous_fen = test_fen
                             global_board = chess.Board()
-                            print(f"Weiß erkannt auf {white_side}, Startstellung bestätigt.")
+                            print(f"Weiss erkannt auf {white_side}, Startstellung bestätigt.")
                             # Optional Visualisierung
                             warped_image, _ = warp_perspective(frame, sorted_pts)
                             fig = plot_final_board(warped_image, rotated_mid, rotated_labels, rotated_conf)
@@ -510,7 +510,7 @@ def main():
                     if not fen_found:
                         # Nutzer fragen
                         if user_white_side is None:
-                            print("Konnte nicht automatisch feststellen, wo Weiß ist.")
+                            print("Konnte nicht automatisch feststellen, wo Weiss ist.")
                             user_white_side = input("Bitte wählen: Links/Rechts? ")
                             if user_white_side not in ["Links", "Rechts"]:
                                 user_white_side = "Links"
@@ -537,7 +537,7 @@ def main():
                                 plt.show()
 
                 else:
-                    # Weiß-Seite bekannt
+                    # Weiss-Seite bekannt
                     if white_side == "Rechts":
                         rotated_mid = np.zeros_like(transformed)
                         rotated_mid[:, 0] = 800 - transformed[:, 0]
