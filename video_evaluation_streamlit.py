@@ -11,15 +11,8 @@ import tempfile
 import requests
 import time
 
-# ==============================
-# Logging Konfiguration
-# ==============================
 logging.getLogger("ultralytics").setLevel(logging.ERROR)
 
-# ==============================
-# EXAKTE UI: Wie im alten Code
-# + deine neuen Wünsche
-# ==============================
 st.set_page_config(page_title="CaroCam - Schach-Tracker", layout="wide")
 st.image("CaroCam Logo.png", use_container_width=False, width=450)
 
@@ -245,7 +238,6 @@ def detect_pieces(image, piece_model, config):
             continue
 
         mid_x = x1 + (x2 - x1) / 2
-        # kleiner Offset nach unten
         mid_y = y1 + (y2 - y1) * 0.75
 
         midpoints.append([mid_x, mid_y])
@@ -312,7 +304,7 @@ def adjust_point_D(A,B,C, D_calc, pAB,pBC):
 
 def sort_points(A,B,C,D):
     pts= np.array([A,B,C,D])
-    pts= sorted(pts, key=lambda x:x[1])  # nach y sortieren
+    pts= sorted(pts, key=lambda x:x[1])
     top= sorted(pts[:2], key=lambda x:x[0])
     bot= sorted(pts[2:], key=lambda x:x[0])
     A_,D_ = top
@@ -395,13 +387,6 @@ def expand_bbox(x1,y1,x2,y2,padding, fw,fh):
 # Rückwärts-Suche
 # ==============================
 def search_backwards_for_mate_or_matt(cap, start_frame, max_frames_fix, piece_model, state_info, frame_interval_search):
-    """
-    Durchsucht rückwärts das Video, um eventuell übersehene Mattzüge
-    doch noch in der PGN zu haben. Falls dabei ein Matt gefunden wird,
-    wird die Analyse "state" auf "finished" gesetzt.
-    Wichtig: Den Zug zuerst hinzufügen (global_board + PGN),
-    und dann unmittelbar Schachmatt prüfen, um ggf. schneller abzubrechen.
-    """
     global_board= state_info['global_board']
     color= state_info['color']
     M_= state_info['M']
@@ -425,7 +410,6 @@ def search_backwards_for_mate_or_matt(cap, start_frame, max_frames_fix, piece_mo
             current_frame-= frame_interval_search
             continue
 
-        # Figuren erkennen
         midb, labsb, confsb, _= detect_pieces(frame_b, piece_model, PIECE_DETECTION_CONFIG)
         if midb.shape[0]==0:
             current_frame-= frame_interval_search
@@ -437,7 +421,6 @@ def search_backwards_for_mate_or_matt(cap, start_frame, max_frames_fix, piece_mo
         transfb/= transfb[2,:]
         transfb= transfb[:2,:].T
 
-        # "links" => spiegeln
         if w_side=='links':
             rotb= np.zeros_like(transfb)
             rotb[:,0]= 800 - transfb[:,0]
@@ -448,20 +431,16 @@ def search_backwards_for_mate_or_matt(cap, start_frame, max_frames_fix, piece_mo
         fenb= generate_placement_from_board(rotb, labsb)
         mvb= fen_diff_to_move(prev_fen, fenb, color=color)
         if mvb and mvb in global_board.legal_moves:
-            # 1) Zug pushen + Variation
             global_board.push(mvb)
             node= node.add_variation(mvb)
 
-            # 2) Direkt prüfen auf Matt
             if global_board.is_checkmate():
                 state_info['state'] = "finished"
                 halfm_move_label = f"Zug {(halfmove_count+1)//2}{'a' if color=='w' else 'b'}: {mvb} (Matt!)"
                 with st.expander(halfm_move_label):
-                    # Minimaldarstellung (auf Wunsch könnte man hier das gleiche Layout wie bei anderen Zügen verwenden)
                     st.write(f"Frame {current_frame}: **{mvb}** (Mattzug)")
                 return state_info
 
-            # Kein Matt => Expander + Layout
             halfm_move_label = f"Zug {(halfmove_count+1)//2}{'a' if color=='w' else 'b'}: {mvb}"
             with st.expander(halfm_move_label):
                 col1, col2, col3 = st.columns([1.0, 1.0, 1.0])
@@ -469,7 +448,6 @@ def search_backwards_for_mate_or_matt(cap, start_frame, max_frames_fix, piece_mo
                 with col1:
                     st.image(frame_b, caption=f"Frame {current_frame} (Rückwärts)", channels="BGR")
 
-                # Brett vom gespielten Zug
                 fen_for_board= f"{fenb} {('w' if color=='b' else 'b')} KQkq - 0 1"
                 bsvg= create_chessboard_svg(fen_for_board, last_move= mvb)
 
@@ -506,14 +484,12 @@ def search_backwards_for_mate_or_matt(cap, start_frame, max_frames_fix, piece_mo
                         except:
                             pass
 
-                # Rechts: empfohlener Zug
                 with col3:
                     if bestM:
                         st.markdown("**Empfohlener nächster Zug**: " + bestM)
                         bsvg2= create_chessboard_svg_with_bestmove(fen_for_board,bestM)
                         st.components.v1.html(bsvg2, height=400)
 
-            # Weiterspielen
             state_info['color']= 'b' if color=='w' else 'w'
             state_info['previous_fen']= fenb
             state_info['halfmove_count']+=1
@@ -524,7 +500,7 @@ def search_backwards_for_mate_or_matt(cap, start_frame, max_frames_fix, piece_mo
     return state_info
 
 # =====================================
-# MAIN-Funktion (Zustandsmaschine etc.)
+# MAIN-Funktion (Zustands-Logik etc.)
 # =====================================
 def main():
     # --- Stockfish-Verfügbarkeit checken
@@ -1363,7 +1339,7 @@ def main():
         cap.release()
 
         # =========================
-        # (Optionale) Rückwärtssuche
+        # Rückwärtssuche
         # =========================
         if not state_info['global_board'].is_game_over() and state_info['state']!="finished":
             cap_back= cv2.VideoCapture(temp_video_path)
